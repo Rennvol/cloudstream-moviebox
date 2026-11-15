@@ -103,13 +103,15 @@ class MovieBoxProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     override val mainPage = mainPageOf(
-        "ranking:4516404531735022304" to "Trending",
-        "list:1|1" to "Movies",
-        "list:1|2" to "Series",
-        "ranking:4741626294545400336" to "Top Series",
-        "ranking:7878715743607948784" to "Korean Drama",
-        "ranking:8434602210994128512" to "Anime",
-        "ranking:414907768299210008" to "Bollywood",
+        // categoryType ids come from tab/ranking-list -> data.categoryList
+        "ranking:4809349160627587984" to "Trending",
+        "list:1" to "Movies",
+        "list:2" to "Series",
+        "ranking:4380734070238626200" to "K-Drama",
+        "ranking:5283462032510044280" to "Indo Drama",
+        "ranking:8624142774394406504" to "C-Drama",
+        "ranking:8617025562613270856" to "Anime",
+        "ranking:5307082080063488480" to "Western",
     )
 
     // ---------------------------------------------------------------- signing
@@ -271,7 +273,7 @@ class MovieBoxProvider : MainAPI() {
                 dataOf("/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=$value&page=$page&perPage=20")
             )
             else -> {
-                val channelId = value.split("|").getOrElse(1) { "1" }
+                val channelId = value.substringAfter("|", "1").ifBlank { "1" }
                 val body = JSONObject()
                     .put("page", page).put("perPage", 20)
                     .put("channelId", channelId)
