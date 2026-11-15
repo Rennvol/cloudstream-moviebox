@@ -263,21 +263,29 @@ class MovieBoxProvider : MainAPI() {
         "indonesia", "south korea", "korea", "japan", "china", "hong kong", "taiwan", "thailand",
         "philippines", "malaysia", "singapore", "vietnam"
     )
+    private val westernCountries = setOf(
+        "united states", "usa", "united kingdom", "uk", "canada", "australia", "new zealand",
+        "france", "germany", "spain", "italy", "ireland", "sweden", "norway", "denmark", "netherlands", "belgium", "austria", "switzerland"
+    )
 
-    private fun JSONObject.allowedContent(): Boolean {
+    private fun JSONObject.allowedContent(strictWestern: Boolean = false): Boolean {
         val title = optString("title").ifBlank { optString("name") }.trim()
         if (title.isBlank()) return false
         val country = optString("countryName").trim().lowercase()
-        if (country.isBlank()) return true // missing country: don't drop
-        if (blockedCountries.any { country.contains(it) }) return false
-        // allow western/indo/korea/japan/china/sea; drop "antah berantah" unknowns
+        val hay = (title + " " + country + " " + optString("genre")).lowercase()
+        if (blockedCountries.any { country.contains(it) || hay.contains(it) }) return false
+        if (country.isBlank()) {
+            // no country: drop obvious junk/region hints, keep otherwise
+            return !hay.contains("bollywood") && !hay.contains("hindi") && !hay.contains("tamil") && !hay.contains("telugu") && !hay.contains("malayalam")
+        }
+        if (strictWestern) return westernCountries.any { country == it || country.contains(it) }
         return allowedCountries.any { country == it || country.contains(it) }
     }
 
-    private fun JSONObject.toSearchResponse(onlyType: TvType? = null, filterContent: Boolean = true): SearchResponse? {
+    private fun JSONObject.toSearchResponse(onlyType: TvType? = null, filterContent: Boolean = true, strictWestern: Boolean = false): SearchResponse? {
         val id = optString("subjectId").takeIf { it.isNotBlank() } ?: return null
         val title = optString("title").ifBlank { optString("name") }.trim().takeIf { it.isNotBlank() } ?: return null
-        if (filterContent && !allowedContent()) return null
+        if (filterContent && !allowedContent(strictWestern)) return null
         val type = if (optInt("subjectType", 1) in listOf(2, 7)) TvType.TvSeries else TvType.Movie
         if (onlyType != null && type != onlyType) return null
         val cover = optJSONObject("cover")?.optString("url")?.takeIf { it.startsWith("http") }
@@ -296,7 +304,8 @@ class MovieBoxProvider : MainAPI() {
             kind == "list" && value.startsWith("2") -> TvType.TvSeries
             else -> null
         }
-        val list = when (kind) {
+        val strictWestern = kind == "ranking" && value == "5307082080063488480"
+        val raw = when (kind) {
             "ranking" -> subjectsOf(
                 dataOf("/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=$value&page=$page&perPage=20")
             )
@@ -306,11 +315,13 @@ class MovieBoxProvider : MainAPI() {
                     .put("page", page).put("perPage", 20)
                     .put("channelId", channelId)
                     .put("classify", "All").put("country", "All")
-                    .put("year", "All").put("genre", "All").put("sort", "ForYou")
+                    .put("year", "All").put("genre", "All").put("sort", "Latest")
                     .toString()
                 subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body))
             }
-        }.mapNotNull { it.toSearchResponse(onlyType, filterContent = true) }
+        }
+        val sorted = if (kind == "list") raw.sortedByDescending { it.optString("releaseDate") } else raw
+        val list = sorted.mapNotNull { it.toSearchResponse(onlyType, filterContent = true, strictWestern = strictWestern) }
 
         return newHomePageResponse(listOf(HomePageList(request.name, list)))
     }
