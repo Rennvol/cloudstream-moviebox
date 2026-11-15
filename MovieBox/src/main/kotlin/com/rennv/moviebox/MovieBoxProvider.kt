@@ -1,0 +1,470 @@
+package com.rennv.moviebox
+
+import android.net.Uri
+import android.util.Base64
+import com.lagradost.cloudstream3.Actor
+import com.lagradost.cloudstream3.ActorData
+import com.lagradost.cloudstream3.Episode
+import com.lagradost.cloudstream3.HomePageList
+import com.lagradost.cloudstream3.HomePageResponse
+import com.lagradost.cloudstream3.LoadResponse
+import com.lagradost.cloudstream3.MainAPI
+import com.lagradost.cloudstream3.MainPageRequest
+import com.lagradost.cloudstream3.Score
+import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.SearchResponseList
+import com.lagradost.cloudstream3.SubtitleFile
+import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.mainPageOf
+import com.lagradost.cloudstream3.newEpisode
+import com.lagradost.cloudstream3.newHomePageResponse
+import com.lagradost.cloudstream3.newMovieLoadResponse
+import com.lagradost.cloudstream3.newMovieSearchResponse
+import com.lagradost.cloudstream3.newSubtitleFile
+import com.lagradost.cloudstream3.newTvSeriesLoadResponse
+import com.lagradost.cloudstream3.toNewSearchResponseList
+import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.INFER_TYPE
+import com.lagradost.cloudstream3.utils.Qualities
+import com.lagradost.cloudstream3.utils.newExtractorLink
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import java.security.MessageDigest
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
+
+/**
+ * MovieBox (moviebox.ph) provider.
+ *
+ * Talks to the mobile BFF (wefeed-mobile-bff) which every request signs:
+ *  - x-client-token : "<ms>,<md5(reversed ms)>"
+ *  - x-tr-signature : "<ms>|2|<base64 hmac-md5(canonical)>"
+ *  - x-client-info  : device fingerprint json
+ * An anonymous bearer token comes back in the `x-user` response header and is
+ * required by search / play-info / resource.
+ */
+class MovieBoxProvider : MainAPI() {
+
+    companion object {
+        private val HOSTS = listOf(
+            "https://api6.aoneroom.com",
+            "https://api5.aoneroom.com",
+            "https://api4.aoneroom.com",
+            "https://api4sg.aoneroom.com",
+            "https://api3.aoneroom.com",
+            "https://api6sg.aoneroom.com",
+            "https://api.inprovider.com",
+        )
+
+        // The signing key is base64 of another base64 string. One decode gives
+        // 40 printable chars, the real HMAC key is the second decode (30 bytes).
+        private const val KEY_DEFAULT_B64 = "NzZpUmwwN3MweFNOOWpxbUVXQXQ3OUVCSlp1bElRSXNWNjRGWnIyTw=="
+        private const val KEY_ALT_B64 = "WHFuMm5uTzQxL0w5Mm8xaXVYaFNMSFRiWHZZNFo1Wlo2Mm04bVNMQQ=="
+
+        private const val MODEL = "22101316G"
+        private const val UA =
+            "com.community.oneroom/50020042 (Linux; U; Android 14; en_IN; $MODEL; " +
+                "Build/UD1A.230803.041; Cronet/145.0.7582.0)"
+
+        private val DEVICE_ID: String = (1..32)
+            .map { "0123456789abcdef".random() }
+            .joinToString("")
+
+        private val CLIENT_INFO = JSONObject()
+            .put("package_name", "com.community.oneroom")
+            .put("version_name", "3.0.03.0529.03")
+            .put("version_code", 50020042)
+            .put("os", "android")
+            .put("os_version", "14")
+            .put("device_id", DEVICE_ID)
+            .put("install_store", "official")
+            .put("gaid", "1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d")
+            .put("brand", "xiaomi")
+            .put("model", MODEL)
+            .put("system_language", "en")
+            .put("net", "NETWORK_WIFI")
+            .put("region", "US")
+            .put("timezone", "Asia/Jakarta")
+            .put("sp_code", "")
+            .toString()
+
+        @Volatile
+        private var bearer: String? = null
+    }
+
+    override var name = "MovieBox"
+    override var mainUrl = HOSTS[0]
+    override var lang = "id"
+    override val hasMainPage = true
+    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
+
+    override val mainPage = mainPageOf(
+        "ranking:4516404531735022304" to "Trending",
+        "list:1|1" to "Movies",
+        "list:1|2" to "Series",
+        "ranking:4741626294545400336" to "Top Series",
+        "ranking:7878715743607948784" to "Korean Drama",
+        "ranking:8434602210994128512" to "Anime",
+        "ranking:414907768299210008" to "Bollywood",
+    )
+
+    // ---------------------------------------------------------------- signing
+
+    private fun md5Hex(input: ByteArray): String =
+        MessageDigest.getInstance("MD5").digest(input).joinToString("") { "%02x".format(it) }
+
+    private fun base64Bytes(value: String): ByteArray =
+        Base64.decode(value, Base64.DEFAULT)
+
+    private fun xClientToken(ts: Long): String =
+        "$ts," + md5Hex(ts.toString().reversed().toByteArray())
+
+    private fun canonicalUrl(url: String): String {
+        val uri = Uri.parse(url)
+        val path = uri.path ?: ""
+        val names = uri.queryParameterNames
+        if (names.isEmpty()) return path
+        val query = names.sorted().joinToString("&") { key ->
+            uri.getQueryParameters(key).joinToString("&") { value -> "$key=$value" }
+        }
+        return "$path?$query"
+    }
+
+    private fun canonicalString(
+        method: String,
+        accept: String,
+        contentType: String,
+        url: String,
+        body: String?,
+        ts: Long,
+    ): String {
+        val bytes = body?.toByteArray()
+        val bodyHash = if (bytes != null) md5Hex(bytes.copyOfRange(0, minOf(bytes.size, 102400))) else ""
+        val bodyLength = bytes?.size?.toString() ?: ""
+        return listOf(
+            method.uppercase(), accept, contentType, bodyLength,
+            ts.toString(), bodyHash, canonicalUrl(url),
+        ).joinToString("\n")
+    }
+
+    private fun xTrSignature(
+        method: String,
+        accept: String,
+        contentType: String,
+        url: String,
+        body: String?,
+        ts: Long,
+        useAltKey: Boolean = false,
+    ): String {
+        val canonical = canonicalString(method, accept, contentType, url, body, ts)
+        val mac = Mac.getInstance("HmacMD5")
+        mac.init(SecretKeySpec(base64Bytes(String(base64Bytes(if (useAltKey) KEY_ALT_B64 else KEY_DEFAULT_B64))), "HmacMD5"))
+        val sig = Base64.encodeToString(mac.doFinal(canonical.toByteArray()), Base64.NO_WRAP)
+        return "$ts|2|$sig"
+    }
+
+    // ---------------------------------------------------------------- request
+
+    private suspend fun request(
+        pathWithQuery: String,
+        method: String = "GET",
+        body: String? = null,
+        bootstrap: Boolean = false,
+    ): JSONObject {
+        val accept = "application/json"
+        val contentType = if (body != null) "application/json; charset=utf-8" else "application/json"
+        var lastError: String? = null
+
+        for (host in HOSTS) {
+            val url = host + pathWithQuery
+            val ts = System.currentTimeMillis()
+            val headers = mutableMapOf(
+                "User-Agent" to UA,
+                "Accept" to accept,
+                "Content-Type" to contentType,
+                "Connection" to "keep-alive",
+                "x-client-token" to xClientToken(ts),
+                "x-tr-signature" to xTrSignature(method, accept, contentType, url, body, ts),
+                "x-client-info" to CLIENT_INFO,
+                "x-client-status" to "0",
+            )
+            if (!bootstrap) currentToken()?.let { headers["Authorization"] = "Bearer $it" }
+
+            val response = try {
+                if (method == "POST") {
+                    app.post(url, headers = headers, requestBody = (body ?: "").toRequestBody(contentType.toMediaType()))
+                } else {
+                    app.get(url, headers = headers)
+                }
+            } catch (e: Exception) {
+                lastError = e.message
+                continue
+            }
+
+            response.headers["x-user"]?.let { absorbToken(it) }
+
+            if (response.code == 200) {
+                mainUrl = host
+                return JSONObject(response.body?.string() ?: "{}")
+            }
+            lastError = "HTTP ${response.code}: ${(response.body?.string() ?: "").take(200)}"
+            if (response.code !in listOf(403, 407, 429, 500, 502, 503, 504)) break
+        }
+        throw Exception("MovieBox request failed: $lastError")
+    }
+
+    private fun absorbToken(xUser: String) {
+        try {
+            JSONObject(xUser).optString("token").takeIf { it.isNotBlank() }?.let { bearer = it }
+        } catch (_: Exception) {
+        }
+    }
+
+    private suspend fun currentToken(): String? {
+        bearer?.let { return it }
+        request("/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version=", bootstrap = true)
+        return bearer
+    }
+
+    private suspend fun dataOf(pathWithQuery: String, method: String = "GET", body: String? = null): JSONObject? {
+        val root = request(pathWithQuery, method, body)
+        return root.optJSONObject("data")
+    }
+
+    // ------------------------------------------------------------------ parse
+
+    private fun subjectsOf(node: JSONObject?): List<JSONObject> {
+        node ?: return emptyList()
+        val out = mutableListOf<JSONObject>()
+        node.optJSONArray("subjectList")?.let { arr -> out += arr.objects() }
+        node.optJSONArray("subjects")?.let { arr -> out += arr.objects() }
+        node.optJSONArray("items")?.let { arr -> out += arr.objects() }
+        node.optJSONArray("results")?.forEach { r ->
+            (r as? JSONObject)?.optJSONArray("subjects")?.let { arr -> out += arr.objects() }
+        }
+        return out
+    }
+
+    private fun JSONArray.objects(): List<JSONObject> =
+        (0 until length()).mapNotNull { optJSONObject(it) }
+
+    private fun JSONObject.toSearchResponse(): SearchResponse? {
+        val id = optString("subjectId").takeIf { it.isNotBlank() } ?: return null
+        val title = optString("title").takeIf { it.isNotBlank() } ?: return null
+        val type = if (optInt("subjectType", 1) in listOf(2, 7)) TvType.TvSeries else TvType.Movie
+        return newMovieSearchResponse(title, "$id|0|0", type) {
+            posterUrl = optJSONObject("cover")?.optString("url")
+            this.year = optString("releaseDate").take(4).toIntOrNull()
+        }
+    }
+
+    // ------------------------------------------------------------------ API
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val (kind, value) = request.data.split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+        val list = when (kind) {
+            "ranking" -> subjectsOf(
+                dataOf("/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=$value&page=$page&perPage=20")
+            )
+            else -> {
+                val channelId = value.split("|").getOrElse(1) { "1" }
+                val body = JSONObject()
+                    .put("page", page).put("perPage", 20)
+                    .put("channelId", channelId)
+                    .put("classify", "All").put("country", "All")
+                    .put("year", "All").put("genre", "All").put("sort", "ForYou")
+                    .toString()
+                subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body))
+            }
+        }.mapNotNull { it.toSearchResponse() }
+
+        return newHomePageResponse(listOf(HomePageList(request.name, list)))
+    }
+
+    override suspend fun search(query: String, page: Int): SearchResponseList {
+        val body = JSONObject()
+            .put("page", page).put("perPage", 20).put("keyword", query)
+            .toString()
+        val list = subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/search/v2", "POST", body))
+            .mapNotNull { it.toSearchResponse() }
+        return list.toNewSearchResponseList()
+    }
+
+    override suspend fun load(url: String): LoadResponse {
+        val parts = url.split("|")
+        val id = parts[0]
+        val data = dataOf("/wefeed-mobile-bff/subject-api/get?subjectId=$id")
+            ?: throw Exception("MovieBox: no data for $id")
+
+        val title = data.optString("title").substringBefore("[").trim()
+        val description = data.optString("description")
+        val releaseDate = data.optString("releaseDate")
+        val year = releaseDate.take(4).toIntOrNull()
+        val tags = data.optString("genre").split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        val poster = data.optJSONObject("cover")?.optString("url")
+        val isSeries = data.optInt("subjectType", 1) in listOf(2, 7)
+        val score = data.optString("imdbRatingValue").toDoubleOrNull()?.let { Score.from10(it.toString()) }
+        val actors = data.optJSONArray("staffList")?.objects()
+            ?.filter { it.optInt("staffType") == 1 }
+            ?.mapNotNull { staff ->
+                staff.optString("name").takeIf { it.isNotBlank() }?.let { n ->
+                    ActorData(Actor(n, staff.optString("avatarUrl")), roleString = staff.optString("character"))
+                }
+            }?.distinctBy { it.actor.name } ?: emptyList()
+
+        if (!isSeries) {
+            return newMovieLoadResponse(title, "$id|0|0", TvType.Movie, "$id|0|0") {
+                this.posterUrl = poster
+                this.plot = description
+                this.year = year
+                this.tags = tags
+                this.score = score
+                this.actors = actors
+                this.duration = parseDuration(data.optString("duration"))
+            }
+        }
+
+        // Series: seasons come from season-info, one call per dub (language variant).
+        val subjectIds = mutableListOf(id)
+        data.optJSONArray("dubs")?.objects()?.forEach { dub ->
+            dub.optString("subjectId").takeIf { it.isNotBlank() && it !in subjectIds }?.let { subjectIds += it }
+        }
+
+        val episodes = mutableListOf<Episode>()
+        var seasonCount = 0
+        for (sid in subjectIds) {
+            val seasons = dataOf("/wefeed-mobile-bff/subject-api/season-info?subjectId=$sid")
+                ?.optJSONArray("seasons")?.objects() ?: continue
+            seasonCount = maxOf(seasonCount, seasons.size)
+            for (season in seasons) {
+                val se = season.optInt("se", 1)
+                val maxEp = season.optInt("maxEp", 0)
+                for (ep in 1..maxEp) {
+                    episodes += newEpisode("$sid|$se|$ep") {
+                        this.season = se
+                        this.episode = ep
+                        this.name = "S$se E$ep"
+                    }
+                }
+            }
+        }
+
+        return newTvSeriesLoadResponse(title, "$id|0|0", TvType.TvSeries, episodes) {
+            this.posterUrl = poster
+            this.plot = description
+            this.year = year
+            this.tags = tags
+            this.score = score
+            this.actors = actors
+        }
+    }
+
+    private fun parseDuration(value: String): Int? {
+        if (value.isBlank()) return null
+        Regex("(\\d+)h").find(value)?.let { hours ->
+            val minutes = Regex("(\\d+)m").find(value)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            return hours.groupValues[1].toInt() * 60 + minutes
+        }
+        return Regex("(\\d+)").find(value)?.groupValues?.get(1)?.toIntOrNull()
+    }
+
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Boolean {
+        val parts = data.split("|")
+        val id = parts[0]
+        val season = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        val episode = parts.getOrNull(2)?.toIntOrNull() ?: 0
+        var found = false
+
+        // 1. Movies (and some series) expose ready-made files here.
+        val detail = dataOf("/wefeed-mobile-bff/subject-api/get?subjectId=$id")
+        detail?.optJSONArray("resourceDetectors")?.objects()?.forEach { detector ->
+            detector.optJSONArray("resolutionList")?.objects()?.forEach { res ->
+                val resEpisode = res.optInt("episode", 0)
+                val resSeason = res.optInt("se", 0)
+                if (episode > 0 && resEpisode != 0 && resEpisode != episode) return@forEach
+                if (episode > 0 && resSeason != 0 && resSeason != season) return@forEach
+                val link = res.optString("resourceLink").takeIf { it.startsWith("http") } ?: return@forEach
+                callback(newVideoLink(link, res.optInt("resolution", detector.optInt("resolution", 0))))
+                found = true
+            }
+            val direct = detector.optString("downloadUrl").takeIf { it.startsWith("http") }
+            if (direct != null) {
+                callback(newVideoLink(direct, 0))
+                found = true
+            }
+        }
+
+        // 2. Per-episode resources.
+        if (episode > 0) {
+            val list = dataOf("/wefeed-mobile-bff/subject-api/resource?subjectId=$id&se=$season&ep=$episode")
+                ?.optJSONArray("list")?.objects() ?: emptyList()
+            val wanted = listOf(season * 10000 + episode, season * 100 + episode)
+            val chosen = list.filter { it.optInt("episode", 0) in wanted }.ifEmpty { list }
+            chosen.forEach { item ->
+                val link = item.optString("resourceLink").takeIf { it.startsWith("http") } ?: return@forEach
+                callback(newVideoLink(link, item.optInt("resolution", 0)))
+                found = true
+                item.optJSONArray("extCaptions")?.objects()?.forEach { captionCallback(it, subtitleCallback) }
+            }
+        }
+
+        // 3. Signed streams (often a promo clip for locked titles, harmless extra).
+        val streams = dataOf("/wefeed-mobile-bff/subject-api/play-info?subjectId=$id&se=$season&ep=$episode")
+            ?.optJSONArray("streams")?.objects() ?: emptyList()
+        streams.forEach { stream ->
+            val link = stream.optString("url").takeIf { it.startsWith("http") } ?: return@forEach
+            val quality = stream.optString("resolutions")
+                .split(",").firstOrNull()?.trim()?.toIntOrNull() ?: 0
+            callback(newSignedStream(link, quality, stream.optString("signCookie")))
+            found = true
+            val streamId = stream.optString("id")
+            if (streamId.isNotBlank()) {
+                dataOf("/wefeed-mobile-bff/subject-api/get-stream-captions?subjectId=$id&streamId=$streamId")
+                    ?.optJSONArray("extCaptions")?.objects()?.forEach { captionCallback(it, subtitleCallback) }
+            }
+        }
+
+        return found
+    }
+
+    private fun captionCallback(caption: JSONObject, subtitleCallback: (SubtitleFile) -> Unit) {
+        val url = caption.optString("url").takeIf { it.startsWith("http") } ?: return
+        val lang = caption.optString("language")
+            .ifBlank { caption.optString("lanName") }
+            .ifBlank { caption.optString("lan") }
+            .ifBlank { "Unknown" }
+        subtitleCallback(newSubtitleFile(url, lang))
+    }
+
+    private fun newVideoLink(url: String, quality: Int) = newExtractorLink(
+        source = name,
+        name = "$name ${if (quality > 0) "${quality}p" else "auto"}",
+        url = url,
+        type = ExtractorLinkType.VIDEO,
+    ) {
+        this.headers = mapOf("Referer" to mainUrl)
+        this.quality = if (quality > 0) quality else Qualities.Unknown.value
+    }
+
+    private fun newSignedStream(url: String, quality: Int, signCookie: String) = newExtractorLink(
+        source = name,
+        name = "$name stream ${if (quality > 0) "${quality}p" else ""}".trim(),
+        url = url,
+        type = if (url.contains(".mpd")) ExtractorLinkType.DASH
+        else if (url.contains(".m3u8")) ExtractorLinkType.M3U8
+        else if (url.contains(".mp4") || url.contains(".mkv")) ExtractorLinkType.VIDEO
+        else INFER_TYPE,
+    ) {
+        this.quality = if (quality > 0) quality else Qualities.Unknown.value
+        if (signCookie.isNotBlank()) this.headers = mapOf("Cookie" to signCookie)
+    }
+}

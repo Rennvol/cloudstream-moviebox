@@ -1,0 +1,8 @@
+{
+  "name": "Rennvol MovieBox",
+  "description": "MovieBox (moviebox.ph) extension for CloudStream - movies and series, multi audio.",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/Rennvol/cloudstream-moviebox/builds/plugins.json"
+  ]
+}
