@@ -299,10 +299,13 @@ class MovieBoxProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val parts = url.split("|")
         val id = parts[0]
-        val data = dataOf("/wefeed-mobile-bff/subject-api/get?subjectId=$id")
-            ?: throw Exception("MovieBox: no data for $id")
+        val root = request("/wefeed-mobile-bff/subject-api/get?subjectId=$id")
+        val data = root.optJSONObject("data") ?: root.optJSONObject("subject") ?: root
+        if (data.length() == 0 || data.optString("title").isBlank() && data.optString("subjectId").isBlank()) {
+            throw Exception("MovieBox: no data for $id (code=${root.opt("code")})")
+        }
 
-        val title = data.optString("title").substringBefore("[").trim()
+        val title = data.optString("title").substringBefore("[").trim().ifBlank { "Unknown" }
         val description = data.optString("description")
         val releaseDate = data.optString("releaseDate")
         val year = releaseDate.take(4).toIntOrNull()
