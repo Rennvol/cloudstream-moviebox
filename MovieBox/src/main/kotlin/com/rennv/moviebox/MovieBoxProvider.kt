@@ -254,12 +254,14 @@ class MovieBoxProvider : MainAPI() {
     private fun JSONArray.objects(): List<JSONObject> =
         (0 until length()).mapNotNull { optJSONObject(it) }
 
-    private fun JSONObject.toSearchResponse(): SearchResponse? {
+    private fun JSONObject.toSearchResponse(onlyType: TvType? = null): SearchResponse? {
         val id = optString("subjectId").takeIf { it.isNotBlank() } ?: return null
         val title = optString("title").takeIf { it.isNotBlank() } ?: return null
         val type = if (optInt("subjectType", 1) in listOf(2, 7)) TvType.TvSeries else TvType.Movie
+        if (onlyType != null && type != onlyType) return null
+        val cover = optJSONObject("cover")?.optString("url")?.takeIf { it.startsWith("http") }
         return newMovieSearchResponse(title, "$id|0|0", type) {
-            posterUrl = optJSONObject("cover")?.optString("url")
+            posterUrl = cover
             this.year = optString("releaseDate").take(4).toIntOrNull()
         }
     }
@@ -268,6 +270,11 @@ class MovieBoxProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val (kind, value) = request.data.split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+        val onlyType = when {
+            kind == "list" && value.startsWith("1") -> TvType.Movie
+            kind == "list" && value.startsWith("2") -> TvType.TvSeries
+            else -> null
+        }
         val list = when (kind) {
             "ranking" -> subjectsOf(
                 dataOf("/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=$value&page=$page&perPage=20")
@@ -282,7 +289,7 @@ class MovieBoxProvider : MainAPI() {
                     .toString()
                 subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body))
             }
-        }.mapNotNull { it.toSearchResponse() }
+        }.mapNotNull { it.toSearchResponse(onlyType) }
 
         return newHomePageResponse(listOf(HomePageList(request.name, list)))
     }
@@ -300,14 +307,12 @@ class MovieBoxProvider : MainAPI() {
         val parts = url.split("|")
         val id = parts[0]
         val root = request("/wefeed-mobile-bff/subject-api/get?subjectId=$id")
-        val data = root.optJSONObject("data") ?: root.optJSONObject("subject") ?: root
+        val data = root.optJSONObject("data") ?: root.optJSONObject("subject") ?: JSONObject()
         val titleRaw = data.optString("title").ifBlank { data.optString("name") }
-        val sid = data.optString("subjectId").ifBlank { data.optString("id") }
-        if (data.length() == 0 || (titleRaw.isBlank() && sid.isBlank())) {
-            throw Exception("MovieBox: no data for $id (code=${root.opt("code")}, msg=${root.optString("message")}) ${root.toString().take(180)}")
-        }
+        val sid0 = data.optString("subjectId").ifBlank { data.optString("id") }.ifBlank { id }
+        val hasDetail = data.length() > 0 && (titleRaw.isNotBlank() || sid0.isNotBlank())
 
-        val title = titleRaw.substringBefore("[").trim().ifBlank { "Unknown" }
+        val title = titleRaw.substringBefore("[").trim().ifBlank { "MovieBox $id" }
         val description = data.optString("description")
         val releaseDate = data.optString("releaseDate")
         val year = releaseDate.take(4).toIntOrNull()
@@ -342,6 +347,7 @@ class MovieBoxProvider : MainAPI() {
         }
 
         val episodes = mutableListOf<Episode>()
+        val seen = mutableSetOf<String>()
         var seasonCount = 0
         for (sid in subjectIds) {
             val seasons = dataOf("/wefeed-mobile-bff/subject-api/season-info?subjectId=$sid")
@@ -351,12 +357,30 @@ class MovieBoxProvider : MainAPI() {
                 val se = season.optInt("se", 1)
                 val maxEp = season.optInt("maxEp", 0)
                 for (ep in 1..maxEp) {
-                    episodes += newEpisode("$sid|$se|$ep") {
+                    val key = "$sid|$se|$ep"
+                    if (!seen.add(key)) continue
+                    episodes += newEpisode(key) {
                         this.season = se
                         this.episode = ep
                         this.name = "S$se E$ep"
                     }
                 }
+            }
+        }
+        if (episodes.isEmpty()) {
+            val res = dataOf("/wefeed-mobile-bff/subject-api/resource?subjectId=$id&se=1&ep=1")
+            val list = res?.optJSONArray("list")?.objects() ?: emptyList()
+            for (item in list) {
+                val rawEp = item.optInt("episode", item.optInt("ep", 0))
+                if (rawEp <= 0) continue
+                val se = if (rawEp >= 10000) rawEp / 10000 else if (rawEp >= 100) rawEp / 100 else 1
+                val ep = if (rawEp >= 10000) rawEp % 10000 else if (rawEp >= 100) rawEp % 100 else rawEp
+                val key = "$id|$se|$ep"
+                if (!seen.add(key)) continue
+                episodes += newEpisode(key) { this.season = se; this.episode = ep; this.name = "S$se E$ep" }
+            }
+            if (episodes.isEmpty()) {
+                episodes += newEpisode("$id|1|1") { this.season = 1; this.episode = 1; this.name = "Episode 1" }
             }
         }
 
