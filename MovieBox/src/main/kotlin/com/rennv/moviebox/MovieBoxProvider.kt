@@ -254,9 +254,30 @@ class MovieBoxProvider : MainAPI() {
     private fun JSONArray.objects(): List<JSONObject> =
         (0 until length()).mapNotNull { optJSONObject(it) }
 
-    private fun JSONObject.toSearchResponse(onlyType: TvType? = null): SearchResponse? {
+    private val blockedCountries = setOf(
+        "india", "pakistan", "bangladesh", "nepal", "sri lanka", "nigeria", "egypt", "turkey", "türkiye"
+    )
+    private val allowedCountries = setOf(
+        "united states", "usa", "united kingdom", "uk", "canada", "australia", "new zealand",
+        "france", "germany", "spain", "italy", "ireland", "sweden", "norway", "denmark", "netherlands", "belgium", "austria", "switzerland",
+        "indonesia", "south korea", "korea", "japan", "china", "hong kong", "taiwan", "thailand",
+        "philippines", "malaysia", "singapore", "vietnam"
+    )
+
+    private fun JSONObject.allowedContent(): Boolean {
+        val title = optString("title").ifBlank { optString("name") }.trim()
+        if (title.isBlank()) return false
+        val country = optString("countryName").trim().lowercase()
+        if (country.isBlank()) return true // missing country: don't drop
+        if (blockedCountries.any { country.contains(it) }) return false
+        // allow western/indo/korea/japan/china/sea; drop "antah berantah" unknowns
+        return allowedCountries.any { country == it || country.contains(it) }
+    }
+
+    private fun JSONObject.toSearchResponse(onlyType: TvType? = null, filterContent: Boolean = true): SearchResponse? {
         val id = optString("subjectId").takeIf { it.isNotBlank() } ?: return null
-        val title = optString("title").takeIf { it.isNotBlank() } ?: return null
+        val title = optString("title").ifBlank { optString("name") }.trim().takeIf { it.isNotBlank() } ?: return null
+        if (filterContent && !allowedContent()) return null
         val type = if (optInt("subjectType", 1) in listOf(2, 7)) TvType.TvSeries else TvType.Movie
         if (onlyType != null && type != onlyType) return null
         val cover = optJSONObject("cover")?.optString("url")?.takeIf { it.startsWith("http") }
@@ -289,7 +310,7 @@ class MovieBoxProvider : MainAPI() {
                     .toString()
                 subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body))
             }
-        }.mapNotNull { it.toSearchResponse(onlyType) }
+        }.mapNotNull { it.toSearchResponse(onlyType, filterContent = true) }
 
         return newHomePageResponse(listOf(HomePageList(request.name, list)))
     }
@@ -299,7 +320,7 @@ class MovieBoxProvider : MainAPI() {
             .put("page", page).put("perPage", 20).put("keyword", query)
             .toString()
         val list = subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/search/v2", "POST", body))
-            .mapNotNull { it.toSearchResponse() }
+            .mapNotNull { it.toSearchResponse(filterContent = true) }
         return list.toNewSearchResponseList()
     }
 
