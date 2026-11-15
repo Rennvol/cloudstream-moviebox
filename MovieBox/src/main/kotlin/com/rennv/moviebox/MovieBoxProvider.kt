@@ -243,8 +243,8 @@ class MovieBoxProvider : MainAPI() {
         node.optJSONArray("subjectList")?.let { arr -> out += arr.objects() }
         node.optJSONArray("subjects")?.let { arr -> out += arr.objects() }
         node.optJSONArray("items")?.let { arr -> out += arr.objects() }
-        node.optJSONArray("results")?.forEach { r ->
-            (r as? JSONObject)?.optJSONArray("subjects")?.let { arr -> out += arr.objects() }
+        node.optJSONArray("results")?.objects()?.forEach { r ->
+            r.optJSONArray("subjects")?.let { arr -> out += arr.objects() }
         }
         return out
     }
@@ -436,7 +436,7 @@ class MovieBoxProvider : MainAPI() {
         return found
     }
 
-    private fun captionCallback(caption: JSONObject, subtitleCallback: (SubtitleFile) -> Unit) {
+    private suspend fun captionCallback(caption: JSONObject, subtitleCallback: (SubtitleFile) -> Unit) {
         val url = caption.optString("url").takeIf { it.startsWith("http") } ?: return
         val lang = caption.optString("language")
             .ifBlank { caption.optString("lanName") }
@@ -445,7 +445,7 @@ class MovieBoxProvider : MainAPI() {
         subtitleCallback(newSubtitleFile(url, lang))
     }
 
-    private fun newVideoLink(url: String, quality: Int) = newExtractorLink(
+    private suspend fun newVideoLink(url: String, quality: Int) = newExtractorLink(
         source = name,
         name = "$name ${if (quality > 0) "${quality}p" else "auto"}",
         url = url,
@@ -455,7 +455,7 @@ class MovieBoxProvider : MainAPI() {
         this.quality = if (quality > 0) quality else Qualities.Unknown.value
     }
 
-    private fun newSignedStream(url: String, quality: Int, signCookie: String) = newExtractorLink(
+    private suspend fun newSignedStream(url: String, quality: Int, signCookie: String) = newExtractorLink(
         source = name,
         name = "$name stream ${if (quality > 0) "${quality}p" else ""}".trim(),
         url = url,
