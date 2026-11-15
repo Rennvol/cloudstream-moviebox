@@ -301,11 +301,13 @@ class MovieBoxProvider : MainAPI() {
         val id = parts[0]
         val root = request("/wefeed-mobile-bff/subject-api/get?subjectId=$id")
         val data = root.optJSONObject("data") ?: root.optJSONObject("subject") ?: root
-        if (data.length() == 0 || data.optString("title").isBlank() && data.optString("subjectId").isBlank()) {
-            throw Exception("MovieBox: no data for $id (code=${root.opt("code")})")
+        val titleRaw = data.optString("title").ifBlank { data.optString("name") }
+        val sid = data.optString("subjectId").ifBlank { data.optString("id") }
+        if (data.length() == 0 || (titleRaw.isBlank() && sid.isBlank())) {
+            throw Exception("MovieBox: no data for $id (code=${root.opt("code")}, msg=${root.optString("message")}) ${root.toString().take(180)}")
         }
 
-        val title = data.optString("title").substringBefore("[").trim().ifBlank { "Unknown" }
+        val title = titleRaw.substringBefore("[").trim().ifBlank { "Unknown" }
         val description = data.optString("description")
         val releaseDate = data.optString("releaseDate")
         val year = releaseDate.take(4).toIntOrNull()
