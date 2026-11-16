@@ -222,7 +222,7 @@ class MovieBoxHDProvider : MainAPI() {
                 return JSONObject(response.body?.string() ?: "{}")
             }
             lastError = "HTTP ${response.code}: ${(response.body?.string() ?: "").take(200)}"
-            if (response.code !in listOf(403, 407, 429, 500, 502, 503, 504)) break
+            if (response.code !in listOf(400, 401, 403, 407, 429, 500, 502, 503, 504)) break
         }
         throw Exception("MovieBox request failed: $lastError")
     }
