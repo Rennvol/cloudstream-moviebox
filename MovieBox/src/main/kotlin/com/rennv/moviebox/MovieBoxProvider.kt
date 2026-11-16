@@ -439,15 +439,40 @@ class MovieBoxProvider : MainAPI() {
         val episode = parts.getOrNull(2)?.toIntOrNull() ?: 0
         var found = false
 
+        fun collectFromPlayInfo(sid: String, se: Int, ep: Int) {
+            val play = dataOf("/wefeed-mobile-bff/subject-api/play-info?subjectId=$sid&se=$se&ep=$ep") ?: return
+            val streams = play.optJSONArray("streams")?.objects()
+                ?: play.optJSONObject("data")?.optJSONArray("streams")?.objects() ?: emptyList()
+            streams.forEach { stream ->
+                val link = stream.optString("url").takeIf { it.startsWith("http") } ?: return@forEach
+                val quality = stream.optString("resolutions")
+                    .split(",").firstOrNull()?.trim()?.toIntOrNull() ?: 0
+                callback(newSignedStream(link, quality, stream.optString("signCookie")))
+                found = true
+                val streamId = stream.optString("id")
+                if (streamId.isNotBlank()) {
+                    (dataOf("/wefeed-mobile-bff/subject-api/get-stream-captions?subjectId=$sid&streamId=$streamId")
+                        ?.optJSONArray("extCaptions")?.objects()
+                        ?: dataOf("/wefeed-mobile-bff/subject-api/get-ext-captions?subjectId=$sid&resourceId=$streamId")
+                            ?.optJSONArray("extCaptions")?.objects()
+                        ?: dataOf("/wefeed-mobile-bff/subject-api/get-ext-captions?subjectId=$sid&resourceId=$streamId&episode=$ep")
+                            ?.optJSONArray("extCaptions")?.objects()
+                        ?: emptyList()).forEach { captionCallback(it, subtitleCallback) }
+                }
+            }
+        }
+
         // 1. Movies (and some series) expose ready-made files here.
         val detail = dataOf("/wefeed-mobile-bff/subject-api/get?subjectId=$id")
+            ?: dataOf("/wefeed-mobile-bff/subject-api/get?subjectId=$id&detail=1")
         detail?.optJSONArray("resourceDetectors")?.objects()?.forEach { detector ->
             detector.optJSONArray("resolutionList")?.objects()?.forEach { res ->
                 val resEpisode = res.optInt("episode", 0)
                 val resSeason = res.optInt("se", 0)
                 if (episode > 0 && resEpisode != 0 && resEpisode != episode) return@forEach
                 if (episode > 0 && resSeason != 0 && resSeason != season) return@forEach
-                val link = res.optString("resourceLink").takeIf { it.startsWith("http") } ?: return@forEach
+                val link = res.optString("resourceLink").takeIf { it.startsWith("http") }
+                    ?: res.optString("url").takeIf { it.startsWith("http") } ?: return@forEach
                 callback(newVideoLink(link, res.optInt("resolution", detector.optInt("resolution", 0))))
                 found = true
             }
@@ -459,33 +484,28 @@ class MovieBoxProvider : MainAPI() {
         }
 
         // 2. Per-episode resources.
-        if (episode > 0) {
-            val list = dataOf("/wefeed-mobile-bff/subject-api/resource?subjectId=$id&se=$season&ep=$episode")
+        val resourceSids = linkedSetOf(id)
+        detail?.optJSONArray("dubs")?.objects()?.forEach { dub ->
+            dub.optString("subjectId").takeIf { it.isNotBlank() }?.let { resourceSids += it }
+        }
+        for (sid in resourceSids) {
+            val list = dataOf("/wefeed-mobile-bff/subject-api/resource?subjectId=$sid&se=$season&ep=$episode")
                 ?.optJSONArray("list")?.objects() ?: emptyList()
             val wanted = listOf(season * 10000 + episode, season * 100 + episode)
             val chosen = list.filter { it.optInt("episode", 0) in wanted }.ifEmpty { list }
             chosen.forEach { item ->
-                val link = item.optString("resourceLink").takeIf { it.startsWith("http") } ?: return@forEach
+                val link = item.optString("resourceLink").takeIf { it.startsWith("http") }
+                    ?: item.optString("url").takeIf { it.startsWith("http") } ?: return@forEach
                 callback(newVideoLink(link, item.optInt("resolution", 0)))
                 found = true
                 item.optJSONArray("extCaptions")?.objects()?.forEach { captionCallback(it, subtitleCallback) }
             }
         }
 
-        // 3. Signed streams (often a promo clip for locked titles, harmless extra).
-        val streams = dataOf("/wefeed-mobile-bff/subject-api/play-info?subjectId=$id&se=$season&ep=$episode")
-            ?.optJSONArray("streams")?.objects() ?: emptyList()
-        streams.forEach { stream ->
-            val link = stream.optString("url").takeIf { it.startsWith("http") } ?: return@forEach
-            val quality = stream.optString("resolutions")
-                .split(",").firstOrNull()?.trim()?.toIntOrNull() ?: 0
-            callback(newSignedStream(link, quality, stream.optString("signCookie")))
-            found = true
-            val streamId = stream.optString("id")
-            if (streamId.isNotBlank()) {
-                dataOf("/wefeed-mobile-bff/subject-api/get-stream-captions?subjectId=$id&streamId=$streamId")
-                    ?.optJSONArray("extCaptions")?.objects()?.forEach { captionCallback(it, subtitleCallback) }
-            }
+        // 3. Signed streams (dubs/lang variants included).
+        for (sid in resourceSids) {
+            collectFromPlayInfo(sid, season, episode)
+            if (episode > 0 && !found) collectFromPlayInfo(sid, 0, 0)
         }
 
         return found
