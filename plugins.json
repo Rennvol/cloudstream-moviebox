@@ -1,0 +1,20 @@
+[
+    {
+        "name": "NontonWok",
+        "packageName": "com.rennv.nontonwok",
+        "description": "NontonWok (nonton.work) - movies and series, Indonesian content",
+        "version": "1.0.0"
+    },
+    {
+        "name": "MovieBooX",
+        "packageName": "com.rennv.moviebox",
+        "description": "MovieBooX (moviebox.ph) - movies and series, multi audio",
+        "version": "15.0.0"
+    },
+    {
+        "name": "MovieBoxHD",
+        "packageName": "com.rennv.movieboxhd",
+        "description": "MovieBoxHD (moviebox.ph) - kategori sama web, termasuk India",
+        "version": "19.0.0"
+    }
+]
