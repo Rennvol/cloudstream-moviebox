@@ -439,7 +439,7 @@ class MovieBoxProvider : MainAPI() {
         val episode = parts.getOrNull(2)?.toIntOrNull() ?: 0
         var found = false
 
-        fun collectFromPlayInfo(sid: String, se: Int, ep: Int) {
+        suspend fun collectFromPlayInfo(sid: String, se: Int, ep: Int) {
             val play = dataOf("/wefeed-mobile-bff/subject-api/play-info?subjectId=$sid&se=$se&ep=$ep") ?: return
             val streams = play.optJSONArray("streams")?.objects()
                 ?: play.optJSONObject("data")?.optJSONArray("streams")?.objects() ?: emptyList()
