@@ -40,10 +40,10 @@
         "name": "MovieBoxHD"
     },
     {
-        "fileHash": "sha256-2b907f80aeaaee63eda03feed105b38e30957e45d7bcbc17c7bf8827bfdc65c8",
+        "fileHash": "sha256-026d749281fa81e230bbde6667e0ee391bf73b73dc7a4049ec307dbb821439ea",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Rennvol/cloudstream-moviebox",
-        "fileSize": 25681,
+        "fileSize": 27855,
         "status": 3,
         "language": "id",
         "authors": [
