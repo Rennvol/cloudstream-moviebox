@@ -333,18 +333,25 @@ class NontonWokProvider : MainAPI() {
             found = true
         }
 
-        // prefer mp4 streams (proxyRequired flagged but direct url signed)
+        fun pickUrl(s: JSONObject): String? {
+            val proxy = s.optBoolean("proxyRequired", false)
+            val p = s.optString("proxyUrl")
+            if (proxy && p.isNotBlank()) return if (p.startsWith("http")) p else "$mainUrl$p"
+            return s.optString("url").takeIf { it.isNotBlank() }
+        }
+
         root.optJSONArray("streams")?.objects()?.forEach { s ->
             val q = s.optString("resolution").replace("p", "").toIntOrNull() ?: 0
-            emit(s.optString("url"), q, s.optString("resolution").ifBlank { "mp4" })
+            emit(pickUrl(s), q, s.optString("resolution").ifBlank { "mp4" })
         }
         root.optJSONArray("hls")?.objects()?.forEach { s ->
             val q = s.optString("resolution").replace("p", "").toIntOrNull() ?: 0
-            emit(s.optString("url"), q, s.optString("resolution").ifBlank { "hls" })
+            emit(pickUrl(s), q, s.optString("resolution").ifBlank { "hls" })
         }
         root.optJSONArray("dash")?.objects()?.forEach { s ->
             val q = s.optString("resolution").split(",").firstOrNull()?.trim()?.toIntOrNull() ?: 0
-            emit(s.optString("url"), q, "dash ${s.optString("resolution")}", isDash = true)
+            val u = if (s.optBoolean("proxyRequired", false)) pickUrl(s) else s.optString("url")
+            emit(u, q, "dash ${s.optString("resolution")}", isDash = true)
         }
 
         // captions best-effort: try stream ids
