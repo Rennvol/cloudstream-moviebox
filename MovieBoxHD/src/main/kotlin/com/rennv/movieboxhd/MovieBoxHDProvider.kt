@@ -283,43 +283,47 @@ class MovieBoxHDProvider : MainAPI() {
     // ------------------------------------------------------------------ API
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val (kind, value) = request.data.split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
-        val onlyType = when {
-            kind == "list" && value.startsWith("1") -> TvType.Movie
-            kind == "list" && value.startsWith("2") -> TvType.TvSeries
-            else -> null
-        }
-        val raw = when (kind) {
-            "ranking" -> subjectsOf(
-                dataOf("/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=$value&page=$page&perPage=20")
-            )
-            "filter" -> {
-                val tabId = value.substringBefore("|").ifBlank { "2" }
-                val filterJson = value.substringAfter("|", "{}")
-                val base = try { JSONObject(filterJson) } catch (_: Exception) { JSONObject() }
-                val body = JSONObject().put("page", page).put("perPage", 20).put("tabId", tabId)
-                for (k in base.keys()) body.put(k, base.get(k))
-                if (!body.has("classify")) body.put("classify", "All")
-                if (!body.has("country")) body.put("country", "All")
-                if (!body.has("genre")) body.put("genre", "All")
-                if (!body.has("year")) body.put("year", "All")
-                if (!body.has("sort")) body.put("sort", "Hottest")
-                subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body.toString()))
+        return try {
+            val (kind, value) = request.data.split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+            val onlyType = when {
+                kind == "list" && value.startsWith("1") -> TvType.Movie
+                kind == "list" && value.startsWith("2") -> TvType.TvSeries
+                else -> null
             }
-            else -> {
-                val channelId = value.substringAfter("|", "1").ifBlank { "1" }
-                val body = JSONObject()
-                    .put("page", page).put("perPage", 20)
-                    .put("channelId", channelId)
-                    .put("classify", "All").put("country", "All")
-                    .put("year", "All").put("genre", "All").put("sort", "Latest")
-                    .toString()
-                subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body))
+            val raw = when (kind) {
+                "ranking" -> subjectsOf(
+                    dataOf("/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=$value&page=$page&perPage=20")
+                )
+                "filter" -> {
+                    val tabId = value.substringBefore("|").ifBlank { "2" }
+                    val filterJson = value.substringAfter("|", "{}")
+                    val base = try { JSONObject(filterJson) } catch (_: Exception) { JSONObject() }
+                    val body = JSONObject().put("page", page).put("perPage", 20).put("tabId", tabId)
+                    for (k in base.keys()) body.put(k, base.get(k))
+                    if (!body.has("classify")) body.put("classify", "All")
+                    if (!body.has("country")) body.put("country", "All")
+                    if (!body.has("genre")) body.put("genre", "All")
+                    if (!body.has("year")) body.put("year", "All")
+                    if (!body.has("sort")) body.put("sort", "Hottest")
+                    subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body.toString()))
+                }
+                else -> {
+                    val channelId = value.substringAfter("|", "1").ifBlank { "1" }
+                    val body = JSONObject()
+                        .put("page", page).put("perPage", 20)
+                        .put("channelId", channelId)
+                        .put("classify", "All").put("country", "All")
+                        .put("year", "All").put("genre", "All").put("sort", "Latest")
+                        .toString()
+                    subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body))
+                }
             }
+            val sorted = if (kind == "list") raw.sortedByDescending { it.optString("releaseDate") } else raw
+            val list = sorted.mapNotNull { it.toSearchResponse(onlyType) }
+            newHomePageResponse(listOf(HomePageList(request.name, list)))
+        } catch (_: Exception) {
+            newHomePageResponse(listOf(HomePageList(request.name, emptyList())))
         }
-        val sorted = if (kind == "list") raw.sortedByDescending { it.optString("releaseDate") } else raw
-        val list = sorted.mapNotNull { it.toSearchResponse(onlyType) }
-        return newHomePageResponse(listOf(HomePageList(request.name, list)))
     }
 
     override suspend fun search(query: String, page: Int): SearchResponseList {
