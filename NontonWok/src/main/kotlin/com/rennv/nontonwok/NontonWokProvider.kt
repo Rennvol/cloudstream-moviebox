@@ -241,16 +241,43 @@ class NontonWokProvider : MainAPI() {
                     this.name = "Episode 1"
                 }
             }
+            // ponytail: cast/actors not exposed in RSC payload; metadata from /watch fallback below
+            var metaPoster = poster
+            var metaDesc = desc
+            val watchBig = runCatching { extractNextF(fetchText("$mainUrl/watch/$safePath")) }.getOrNull().orEmpty()
+            if (watchBig.isNotBlank()) {
+                if (metaPoster.isNullOrBlank()) {
+                    metaPoster = Regex("""\\\"image\\\":\\\"(https?://[^\\\"]+)\\\"""").find(watchBig)?.groupValues?.get(1)
+                        ?: Regex(""""image":"(https?://[^"]+)"""").find(watchBig)?.groupValues?.get(1)
+                }
+                if (metaDesc.isBlank()) {
+                    metaDesc = Regex("""\\\"description\\\":\\\"([^\\\"]*)\\\"""").find(watchBig)?.groupValues?.get(1)
+                        ?: Regex(""""description":"([^"]*)"""").find(watchBig)?.groupValues?.get(1).orEmpty()
+                }
+            }
             newTvSeriesLoadResponse(title, dataId, TvType.TvSeries, epList) {
-                this.posterUrl = poster
-                this.plot = desc
+                this.posterUrl = metaPoster
+                this.plot = metaDesc
                 this.year = year
                 this.score = rating?.let { Score.from10(it.toString()) }
             }
         } else {
+            var metaPoster = poster
+            var metaDesc = desc
+            val watchBig = runCatching { extractNextF(fetchText("$mainUrl/watch/$safePath")) }.getOrNull().orEmpty()
+            if (watchBig.isNotBlank()) {
+                if (metaPoster.isNullOrBlank()) {
+                    metaPoster = Regex("""\\\"image\\\":\\\"(https?://[^\\\"]+)\\\"""").find(watchBig)?.groupValues?.get(1)
+                        ?: Regex(""""image":"(https?://[^"]+)"""").find(watchBig)?.groupValues?.get(1)
+                }
+                if (metaDesc.isBlank()) {
+                    metaDesc = Regex("""\\\"description\\\":\\\"([^\\\"]*)\\\"""").find(watchBig)?.groupValues?.get(1)
+                        ?: Regex(""""description":"([^"]*)"""").find(watchBig)?.groupValues?.get(1).orEmpty()
+                }
+            }
             newMovieLoadResponse(title, dataId, TvType.Movie, "$dataId|0|0") {
-                this.posterUrl = poster
-                this.plot = desc
+                this.posterUrl = metaPoster
+                this.plot = metaDesc
                 this.year = year
                 this.score = rating?.let { Score.from10(it.toString()) }
             }
