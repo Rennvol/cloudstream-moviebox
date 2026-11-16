@@ -70,12 +70,12 @@ class NontonWokProvider : MainAPI() {
             val start = big.indexOf(marker, i)
             if (start < 0) break
             val arrStart = start + marker.length - 1
-            val arr = extractJsonArray(big, arrStart) ?: run { i = arrStart + 1; continue }
-            arr.objects().forEach { obj ->
+            val arrStr = extractJsonArray(big, arrStart) ?: run { i = arrStart + 1; continue }
+            runCatching { JSONArray(arrStr) }.getOrNull()?.objects()?.forEach { obj ->
                 val sid = obj.optString("subjectId")
                 if (sid.isNotBlank() && seen.add(sid)) out += obj
             }
-            i = arrStart + arr.length
+            i = arrStart + arrStr.length
         }
         // fallback: single objects with subjectId+detailPath
         if (out.isEmpty()) {
@@ -261,7 +261,7 @@ class NontonWokProvider : MainAPI() {
 
         var found = false
 
-        fun emit(url: String?, quality: Int, label: String, isDash: Boolean = false) {
+        suspend fun emit(url: String?, quality: Int, label: String, isDash: Boolean = false) {
             val u = url?.takeIf { isPlayable(it) } ?: return
             val q = if (quality > 0) quality else Qualities.Unknown.value
             val type = when {
