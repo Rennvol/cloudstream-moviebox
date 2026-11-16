@@ -182,12 +182,9 @@ class NontonWokProvider : MainAPI() {
         }
 
         val id = Regex("""\d{10,}""").find(rawId)?.value ?: ""
-        val watchUrl = when {
-            detailPath.isNotBlank() -> "$mainUrl/watch/$detailPath"
-            id.isNotBlank() -> "$mainUrl/watch/$id"
-            else -> "$mainUrl/watch/$rawId"
-        }
-        val html = fetchText(watchUrl)
+        val safePath = detailPath.ifBlank { rawId }.ifBlank { id }
+        val pageUrl = "$mainUrl/play/$safePath"
+        val html = fetchText(pageUrl)
         val big = extractNextF(html)
 
         val subjectId = Regex("""\\"subjectId\\":\\"?(\d+)\\"?""").find(big)?.groupValues?.get(1)
@@ -199,7 +196,7 @@ class NontonWokProvider : MainAPI() {
         val title = Regex("""\\"name\\":\\"([^\\"]+)\\"""").find(big)?.groupValues?.get(1)
             ?: Regex("""\\"title\\":\\"([^\\"]+)\\"""").find(big)?.groupValues?.get(1)
             ?: Regex(""""title":"([^"]+)"""").find(big)?.groupValues?.get(1)
-            ?: detailPath.substringBeforeLast("-").replace("-", " ").ifBlank { "NontonWok" }
+            ?: safePath.substringBeforeLast("-").replace("-", " ").ifBlank { "NontonWok" }
         val poster = Regex("""\\"image\\":\\"(https?://[^\\"]+)\\"""").find(big)?.groupValues?.get(1)
             ?: Regex(""""image":"(https?://[^"]+)"""").find(big)?.groupValues?.get(1)
         val desc = Regex("""\\"description\\":\\"([^\\"]*)\\"""").find(big)?.groupValues?.get(1)
@@ -208,17 +205,14 @@ class NontonWokProvider : MainAPI() {
         val year = Regex(""""releaseDate":"(\d{4})"""").find(big)?.groupValues?.get(1)?.toIntOrNull()
             ?: Regex(""""year":"?(\d{4})"?""").find(big)?.groupValues?.get(1)?.toIntOrNull()
 
-        val safePath = detailPath.ifBlank { rawId }
         val dataId = "$subjectId|$safePath|$contentType"
 
         return if (contentType == "series") {
             val epList = mutableListOf<Episode>()
-            // Parse seasons/episodes from play page RSC payload (VideoPlayer props)
-            val playHtml = runCatching { fetchText("$mainUrl/play/$safePath") }.getOrNull().orEmpty()
-            val playBig = if (playHtml.isNotBlank()) extractNextF(playHtml) else ""
-            if (playBig.isNotBlank()) {
-                val seasonsMatch = Regex("""\\\"seasons\\\":\[(.*?)\]\\s*,\\s*\\\"autoPlay\\\"""", RegexOption.DOT_MATCHES_ALL).find(playBig)
-                    ?: Regex(""""seasons":\[(.*?)\]\s*,\s*"autoPlay"""", RegexOption.DOT_MATCHES_ALL).find(playBig)
+            // Parse seasons/episodes from /play RSC payload (VideoPlayer props)
+            if (big.isNotBlank()) {
+                val seasonsMatch = Regex("""\\\"seasons\\\":\[(.*?)\]\\s*,\\s*\\\"autoPlay\\\"""", RegexOption.DOT_MATCHES_ALL).find(big)
+                    ?: Regex(""""seasons":\[(.*?)\]\s*,\s*"autoPlay"""", RegexOption.DOT_MATCHES_ALL).find(big)
                 val seasonsStr = seasonsMatch?.groupValues?.get(1).orEmpty()
                     .replace("\\\"", "\"")
                 if (seasonsStr.isNotBlank()) {
