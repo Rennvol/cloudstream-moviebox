@@ -315,6 +315,11 @@ class MovieBooXProvider : MainAPI() {
         val sorted = if (kind == "list") raw.sortedByDescending { it.optString("releaseDate") } else raw
         val list = sorted.mapNotNull { it.toSearchResponse(onlyType, filterContent = true, strictWestern = strictWestern) }
 
+        if (list.isEmpty() && page == 1) {
+            val fb = subjectsOf(dataOf("/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=4809349160627587984&page=1&perPage=30"))
+                .mapNotNull { it.toSearchResponse(onlyType, filterContent = false, strictWestern = false) }
+            return newHomePageResponse(listOf(HomePageList(request.name, fb)))
+        }
         return newHomePageResponse(listOf(HomePageList(request.name, list)))
     }
 
