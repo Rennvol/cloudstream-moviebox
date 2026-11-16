@@ -1,9 +1,5 @@
 package com.rennv.nontonwok
 
-import android.net.Uri
-import android.util.Base64
-import com.lagradost.cloudstream3.Actor
-import com.lagradost.cloudstream3.ActorData
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.HomePageList
 import com.lagradost.cloudstream3.HomePageResponse
@@ -29,120 +25,219 @@ import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.INFER_TYPE
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.MessageDigest
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 
-/**
- * NontonWok (nonton.work) provider.
- *
- * This provider interacts with nonton.work website to fetch movie and series data.
- * It uses web scraping and API endpoints to retrieve content.
- */
 class NontonWokProvider : MainAPI() {
 
-    companion object {
-        // The main website
-        private const val HOST = "https://nonton.work"
-
-        // Common user agent for Android device
-        private const val MODEL = "22101316G"
-        private const val UA =
-            "Mozilla/5.0 (Linux; Android 14; $MODEL Build/UD1A.230803.041) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.114 Mobile Safari/537.36"
-    }
-
     override var name = "NontonWok"
-    override var mainUrl = HOST
+    override var mainUrl = "https://nonton.work"
     override var lang = "id"
     override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     override val mainPage = mainPageOf(
-        "0" to "Trending",
-        "1" to "Movies",
-        "2" to "Series",
-        "3" to "Animation",
+        "/|movie" to "Trending Movies",
+        "/|series" to "Trending Series",
+        "/movies" to "Movies",
+        "/tv-series" to "TV Series",
     )
 
-    // ----------------------------------------------------------------------
-    // API endpoints and parsing logic
-    // ----------------------------------------------------------------------
+    private suspend fun fetchText(url: String): String =
+        app.get(url, headers = mapOf("User-Agent" to UA)).text
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val (kind, value) = request.data.split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
-        val onlyType = when {
-            kind == "list" && value == "1" -> TvType.Movie
-            kind == "list" && value == "2" -> TvType.TvSeries
-            else -> null
+    private fun extractNextF(html: String): String {
+        val re = Regex("""self\.__next_f\.push\(\[1,"(.*?)"\]\)""", RegexOption.DOT_MATCHES_ALL)
+        val sb = StringBuilder()
+        re.findAll(html).forEach { m ->
+            val raw = m.groupValues[1]
+            sb.append(
+                raw.replace("\\\"", "\"")
+                    .replace("\\\\", "\\")
+                    .replace("\\n", "\n")
+            )
         }
+        return sb.toString()
+    }
 
-        val raw = when (kind) {
-            "list" -> {
-                // For list endpoints (movies/series), scrape the HTML content
-                when (value) {
-                    "1" -> scrapeMovies(page)
-                    "2" -> scrapeTvSeries(page)
-                    "3" -> scrapeAnimation(page)
-                    else -> scrapeTrending(page)
+    private fun extractItems(big: String): List<JSONObject> {
+        val out = mutableListOf<JSONObject>()
+        val seen = mutableSetOf<String>()
+        // RSC payload embeds items arrays as JSON-ish; parse every `"items":[{...}]` block we can.
+        val marker = "\"items\":["
+        var i = 0
+        while (true) {
+            val start = big.indexOf(marker, i)
+            if (start < 0) break
+            val arrStart = start + marker.length - 1
+            val arr = extractJsonArray(big, arrStart) ?: run { i = arrStart + 1; continue }
+            arr.objects().forEach { obj ->
+                val sid = obj.optString("subjectId")
+                if (sid.isNotBlank() && seen.add(sid)) out += obj
+            }
+            i = arrStart + arr.length
+        }
+        // fallback: single objects with subjectId+detailPath
+        if (out.isEmpty()) {
+            val objRe = Regex("""\{"subjectId":"?\d+"?.*?"detailPath":"[^"]+"\}""")
+            objRe.findAll(big).forEach { m ->
+                runCatching { JSONObject(m.value) }.getOrNull()?.let { obj ->
+                    val sid = obj.optString("subjectId")
+                    if (sid.isNotBlank() && seen.add(sid)) out += obj
                 }
             }
-            else -> {
-                // For other endpoints, use default trending
-                scrapeTrending(page)
-            }
         }
+        return out
+    }
 
-        val list = raw.mapNotNull { it.toSearchResponse(onlyType) }
+    private fun extractJsonArray(s: String, start: Int): String? {
+        if (start !in s.indices || s[start] != '[') return null
+        var depth = 0
+        var inStr = false
+        var esc = false
+        var i = start
+        while (i < s.length) {
+            val c = s[i]
+            if (inStr) {
+                when {
+                    esc -> esc = false
+                    c == '\\' -> esc = true
+                    c == '"' -> inStr = false
+                }
+            } else {
+                when (c) {
+                    '"' -> inStr = true
+                    '[' -> depth++
+                    ']' -> {
+                        depth--
+                        if (depth == 0) return s.substring(start, i + 1)
+                    }
+                }
+            }
+            i++
+        }
+        return null
+    }
 
-        return newHomePageResponse(listOf(HomePageList(request.name, list)))
+    private fun JSONArray.objects(): List<JSONObject> =
+        (0 until length()).mapNotNull { optJSONObject(it) }
+
+    private fun JSONObject.toSearch(want: TvType? = null): SearchResponse? {
+        val id = optString("subjectId").takeIf { it.isNotBlank() } ?: return null
+        val title = optString("title").trim().takeIf { it.isNotBlank() } ?: return null
+        val detailPath = optString("detailPath").trim()
+        val type = if (optInt("subjectType", 1) in listOf(2, 7)) TvType.TvSeries else TvType.Movie
+        if (want != null && type != want) return null
+        val cover = optJSONObject("cover")?.optString("url")?.takeIf { it.startsWith("http") }
+            ?: optString("poster").takeIf { it.startsWith("http") }
+        val url = if (detailPath.isNotBlank()) "$id|$detailPath" else "$id|"
+        return newMovieSearchResponse(title, url, type) {
+            posterUrl = cover
+            this.year = optString("releaseDate").take(4).toIntOrNull()
+                ?: optString("year").toIntOrNull()
+        }
+    }
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val path = request.data.substringBefore("|")
+        val wantStr = request.data.substringAfter("|", "")
+        val want = when (wantStr) {
+            "movie" -> TvType.Movie
+            "series" -> TvType.TvSeries
+            else -> null
+        }
+        val url = if (page <= 1) "$mainUrl$path" else "$mainUrl$path?page=$page"
+        val html = fetchText(url)
+        val big = extractNextF(html)
+        val items = extractItems(big).mapNotNull { it.toSearch(want) }
+        return newHomePageResponse(listOf(HomePageList(request.name, items)))
     }
 
     override suspend fun search(query: String, page: Int): SearchResponseList {
-        val searchResults = scrapeSearch(query, page)
-        return searchResults.toNewSearchResponseList()
+        val url = "$mainUrl/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
+        val html = fetchText(url)
+        val big = extractNextF(html)
+        val list = extractItems(big).mapNotNull { it.toSearch() }
+            .ifEmpty {
+                // fallback: /watch/ links on page
+                Regex("""href="(/watch/([^"]+))"""").findAll(html).mapNotNull { m ->
+                    val slug = m.groupValues[2]
+                    val title = slug.substringBeforeLast("-").replace("-", " ")
+                        .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+                    if (title.isBlank()) null else newMovieSearchResponse(title, "|$slug", TvType.Movie)
+                }.distinctBy { it.name }.toList()
+            }
+        return list.toNewSearchResponseList()
     }
 
     override suspend fun load(url: String): LoadResponse {
-        // Extract ID from URL (last segment)
-        val id = url.substringAfterLast("/").substringBefore("?").takeIf { it.isNotEmpty() } ?: return newMovieLoadResponse("Not found", url, TvType.Movie)
+        val parts = url.split("|")
+        val rawId = parts.getOrNull(0).orEmpty()
+        var detailPath = parts.getOrNull(1).orEmpty()
 
-        // Try to scrape movie/series details
-        val details = scrapeDetails(id) ?: return newMovieLoadResponse("Not found", url, TvType.Movie)
+        // if url is a full watch url or slug
+        if (rawId.contains("/watch/")) detailPath = rawId.substringAfter("/watch/").substringBefore("?")
+        if (rawId.isNotBlank() && rawId.all { it.isDigit() }.not() && detailPath.isBlank()) {
+            detailPath = rawId.substringAfterLast("/")
+        }
 
-        val title = details.optString("title", "")
-        val description = details.optString("description", "")
-        val poster = details.optString("poster", "")
-        val releaseDate = details.optString("releaseDate", "")
-        val year = releaseDate.take(4).toIntOrNull() ?: 0
-        val duration = details.optString("duration", "").let { parseDuration(it) } ?: 0
-        val genres = details.optJSONArray("genres")?.let { getGenres(it) } ?: listOf()
+        val id = Regex("""\d{10,}""").find(rawId)?.value ?: ""
+        val watchUrl = when {
+            detailPath.isNotBlank() -> "$mainUrl/watch/$detailPath"
+            id.isNotBlank() -> "$mainUrl/watch/$id"
+            else -> "$mainUrl/watch/$rawId"
+        }
+        val html = fetchText(watchUrl)
+        val big = extractNextF(html)
 
-        val sid = details.optString("subjectId", id)
-        val isSeries = details.optBoolean("isSeries", false)
+        val subjectId = Regex("""\\"subjectId\\":\\"?(\d+)\\"?""").find(big)?.groupValues?.get(1)
+            ?: Regex(""""subjectId":"?(\d+)"?""").find(big)?.groupValues?.get(1)
+            ?: id
+        val contentType = Regex("""\\"contentType\\":\\"(movie|series)\\"""").find(big)?.groupValues?.get(1)
+            ?: Regex(""""contentType":"(movie|series)"""").find(big)?.groupValues?.get(1)
+            ?: "movie"
+        val title = Regex("""\\"name\\":\\"([^\\"]+)\\"""").find(big)?.groupValues?.get(1)
+            ?: Regex("""\\"title\\":\\"([^\\"]+)\\"""").find(big)?.groupValues?.get(1)
+            ?: Regex(""""title":"([^"]+)"""").find(big)?.groupValues?.get(1)
+            ?: detailPath.substringBeforeLast("-").replace("-", " ").ifBlank { "NontonWok" }
+        val poster = Regex("""\\"image\\":\\"(https?://[^\\"]+)\\"""").find(big)?.groupValues?.get(1)
+            ?: Regex(""""image":"(https?://[^"]+)"""").find(big)?.groupValues?.get(1)
+        val desc = Regex("""\\"description\\":\\"([^\\"]*)\\"""").find(big)?.groupValues?.get(1)
+            ?: Regex(""""description":"([^"]*)"""").find(big)?.groupValues?.get(1).orEmpty()
+        val rating = Regex(""""rating":"([^"]+)"""").find(big)?.groupValues?.get(1)?.toDoubleOrNull()
+        val year = Regex(""""releaseDate":"(\d{4})"""").find(big)?.groupValues?.get(1)?.toIntOrNull()
+            ?: Regex(""""year":"?(\d{4})"?""").find(big)?.groupValues?.get(1)?.toIntOrNull()
 
-        if (!isSeries) {
-            return newMovieLoadResponse(title, "$id|0|0", TvType.Movie, "$id|0|0") {
-                this.plot = description
+        val safePath = detailPath.ifBlank { rawId }
+        val dataId = "$subjectId|$safePath|$contentType"
+
+        return if (contentType == "series") {
+            // ponytail: episode list not in RSC payload; start with S1E1, upgrade when API found
+            val ep = newEpisode("$dataId|1|1") {
+                this.season = 1
+                this.episode = 1
+                this.name = "Episode 1"
+            }
+            newTvSeriesLoadResponse(title, dataId, TvType.TvSeries, listOf(ep)) {
                 this.posterUrl = poster
+                this.plot = desc
                 this.year = year
-                this.tags = genres
-                this.duration = duration
+                this.score = rating?.let { Score.from10(it.toString()) }
+            }
+        } else {
+            newMovieLoadResponse(title, dataId, TvType.Movie, "$dataId|0|0") {
+                this.posterUrl = poster
+                this.plot = desc
+                this.year = year
+                this.score = rating?.let { Score.from10(it.toString()) }
             }
         }
+    }
 
-        // For series, we need to get episodes
-        val episodes = scrapeEpisodes(sid, details) ?: listOf()
-
-        return newTvSeriesLoadResponse(title, "$sid|0|0", TvType.TvSeries, episodes) {
-            this.posterUrl = poster
-            this.plot = description
-            this.year = year
-            this.tags = genres
-        }
+    private fun isPlayable(url: String): Boolean {
+        if (!url.startsWith("http")) return false
+        val u = url.lowercase()
+        return !u.contains("deprecation") && !u.contains("placeholder") && !u.contains("anti_piracy")
     }
 
     override suspend fun loadLinks(
@@ -152,104 +247,73 @@ class NontonWokProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
         val parts = data.split("|")
-        val id = parts[0]
-        val season = parts.getOrNull(1)?.toIntOrNull() ?: 0
-        val episode = parts.getOrNull(2)?.toIntOrNull() ?: 0
+        val subjectId = parts.getOrNull(0).orEmpty()
+        val detailPath = parts.getOrNull(1).orEmpty()
+        val contentType = parts.getOrNull(2).orEmpty().ifBlank { "movie" }
+        val season = parts.getOrNull(3)?.toIntOrNull() ?: 0
+        val episode = parts.getOrNull(4)?.toIntOrNull() ?: 0
 
-        // Try to scrape video links
-        val links = scrapeVideoLinks(id, season, episode) ?: listOf()
+        val streamUrl = "$mainUrl/api/stream?subjectId=$subjectId&detailPath=$detailPath&contentType=$contentType&season=$season&episode=$episode"
+        val json = runCatching { JSONObject(app.get(streamUrl, headers = mapOf("User-Agent" to UA, "Referer" to "$mainUrl/")).text) }.getOrNull()
+            ?: return false
+        if (!json.optBoolean("success", false)) return false
+        val root = json.optJSONObject("data") ?: return false
 
-        if (links.isEmpty()) {
-            return false
+        var found = false
+
+        fun emit(url: String?, quality: Int, label: String, isDash: Boolean = false) {
+            val u = url?.takeIf { isPlayable(it) } ?: return
+            val q = if (quality > 0) quality else Qualities.Unknown.value
+            val type = when {
+                isDash || u.contains(".mpd") -> ExtractorLinkType.DASH
+                u.contains(".m3u8") -> ExtractorLinkType.M3U8
+                else -> INFER_TYPE
+            }
+            callback(
+                newExtractorLink(
+                    source = name,
+                    name = "$name $label".trim(),
+                    url = u,
+                    type = type,
+                ) {
+                    this.quality = q
+                    this.referer = mainUrl
+                }
+            )
+            found = true
         }
 
-        links.forEach { link ->
-            callback(newExtractorLink(link, 0))
+        // prefer mp4 streams (proxyRequired flagged but direct url signed)
+        root.optJSONArray("streams")?.objects()?.forEach { s ->
+            val q = s.optString("resolution").replace("p", "").toIntOrNull() ?: 0
+            emit(s.optString("url"), q, s.optString("resolution").ifBlank { "mp4" })
+        }
+        root.optJSONArray("hls")?.objects()?.forEach { s ->
+            val q = s.optString("resolution").replace("p", "").toIntOrNull() ?: 0
+            emit(s.optString("url"), q, s.optString("resolution").ifBlank { "hls" })
+        }
+        root.optJSONArray("dash")?.objects()?.forEach { s ->
+            val q = s.optString("resolution").split(",").firstOrNull()?.trim()?.toIntOrNull() ?: 0
+            emit(s.optString("url"), q, "dash ${s.optString("resolution")}", isDash = true)
         }
 
-        return true
-    }
-
-    // ----------------------------------------------------------------------
-    // Parsing functions
-    // ----------------------------------------------------------------------
-
-    private fun parseDuration(value: String): Int? {
-        if (value.isBlank()) return null
-        Regex("(\d+)h").find(value)?.let { hours ->
-            val minutes = Regex("(\d+)m").find(value)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            return hours.groupValues[1].toInt() * 60 + minutes
-        }
-        return Regex("(\d+)").find(value)?.groupValues?.get(1)?.toIntOrNull()
-    }
-
-    private fun getGenres(jsonArray: JSONArray): List<String> {
-        val genres = mutableListOf<String>()
-        for (i in 0 until jsonArray.length()) {
-            jsonArray.optJSONObject(i)?.let { genre ->
-                genres.add(genre.optString("name", ""))
+        // captions best-effort: try stream ids
+        val streamId = root.optJSONArray("streams")?.optJSONObject(0)?.optString("id").orEmpty()
+        if (streamId.isNotBlank()) {
+            val capUrl = "$mainUrl/api/captions?subjectId=$subjectId&detailPath=$detailPath&streamId=$streamId&format=mp4"
+            val caps = runCatching { JSONObject(app.get(capUrl, headers = mapOf("User-Agent" to UA, "Referer" to "$mainUrl/")).text) }.getOrNull()
+            caps?.optJSONObject("data")?.optJSONArray("list")?.objects()?.forEach { c ->
+                val u = c.optString("url").takeIf { it.startsWith("http") } ?: return@forEach
+                val lang = c.optString("language").ifBlank { c.optString("lan").ifBlank { "Sub" } }
+                subtitleCallback(newSubtitleFile(u, lang))
             }
         }
-        return genres
+
+        return found
     }
 
-    // ----------------------------------------------------------------------
-    // Web scraping functions
-    // ----------------------------------------------------------------------
-
-    private suspend fun scrapeTrending(page: Int): List<JSONObject> {
-        // This function scrapes trending movies/series from nonton.work
-        // You'll need to implement the scraping logic here
-        // For now, return an empty list
-        return emptyList()
-    }
-
-    private suspend fun scrapeMovies(page: Int): List<JSONObject> {
-        // This function scrapes movies from nonton.work/movies
-        // You'll need to implement the scraping logic here
-        // For now, return an empty list
-        return emptyList()
-    }
-
-    private suspend fun scrapeTvSeries(page: Int): List<JSONObject> {
-        // This function scrapes TV series from nonton.work/tv-series
-        // You'll need to implement the scraping logic here
-        // For now, return an empty list
-        return emptyList()
-    }
-
-    private suspend fun scrapeAnimation(page: Int): List<JSONObject> {
-        // This function scrapes animation from nonton.work/animation
-        // You'll need to implement the scraping logic here
-        // For now, return an empty list
-        return emptyList()
-    }
-
-    private suspend fun scrapeSearch(query: String, page: Int): List<JSONObject> {
-        // This function scrapes search results from nonton.work/search?q=...
-        // You'll need to implement the scraping logic here
-        // For now, return an empty list
-        return emptyList()
-    }
-
-    private suspend fun scrapeDetails(id: String): JSONObject? {
-        // This function scrapes movie/series details from nonton.work/watch/$id
-        // You'll need to implement the scraping logic here
-        // For now, return null
-        return null
-    }
-
-    private suspend fun scrapeEpisodes(sid: String, details: JSONObject): List<Episode>? {
-        // This function scrapes episodes for a series
-        // You'll need to implement the scraping logic here
-        // For now, return null
-        return null
-    }
-
-    private suspend fun scrapeVideoLinks(id: String, season: Int, episode: Int): List<String>? {
-        // This function scrapes video links for a movie/episode
-        // You'll need to implement the scraping logic here
-        // For now, return null
-        return null
+    companion object {
+        private const val UA =
+            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
     }
 }
