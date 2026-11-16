@@ -106,8 +106,14 @@ class MovieBoxProvider : MainAPI() {
         "ranking:4809349160627587984" to "Trending",
         "list:1" to "Movies",
         "list:2" to "Series",
-        "ranking:5307082080063488480" to "Western",
+        "ranking:4380734070238626200" to "K-Drama",
+        "ranking:5283462032510044280" to "Indo Drama",
+        "ranking:8624142774394406504" to "C-Drama",
         "ranking:8617025562613270856" to "Anime",
+        "ranking:5307082080063488480" to "Western",
+        "ranking:5243634416492162328" to "Thai-Drama",
+        "ranking:5692654647810388816" to "J-Drama",
+        "ranking:5166486432344441960" to "Malay Drama",
     )
 
     // ---------------------------------------------------------------- signing
@@ -250,7 +256,7 @@ class MovieBoxProvider : MainAPI() {
     private fun JSONArray.objects(): List<JSONObject> =
         (0 until length()).mapNotNull { optJSONObject(it) }
 
-    private val europeCountries = setOf(
+    private val westernCountries = setOf(
         "united states", "usa", "united kingdom", "uk", "canada", "australia", "new zealand",
         "france", "germany", "spain", "italy", "ireland", "sweden", "norway", "denmark", "netherlands", "belgium", "austria", "switzerland", "poland", "portugal", "finland", "greece", "czech", "romania", "hungary", "iceland", "russia", "ukraine"
     )
@@ -261,12 +267,11 @@ class MovieBoxProvider : MainAPI() {
         val country = optString("countryName").trim().lowercase()
         val genre = optString("genre").lowercase()
         val hay = "$title $country $genre"
-        val junk = listOf("india","pakistan","bangladesh","nepal","sri lanka","nigeria","egypt","turkey","türkiye","bollywood","hindi","tamil","telugu","malayalam","kannada","punjabi","bhojpuri","marathi","gujarati")
-        if (junk.any { hay.contains(it) }) return false
-        if (country.isBlank()) return false
-        if (genre.contains("anime")) return true
-        // keep europe/western only (+ anime handled above)
-        return europeCountries.any { country == it || country.contains(it) }
+        val indiaJunk = listOf("india","pakistan","bangladesh","nepal","sri lanka","bollywood","hindi","tamil","telugu","malayalam","kannada","punjabi","bhojpuri","marathi","gujarati")
+        if (indiaJunk.any { hay.contains(it) }) return false
+        if (country.isBlank()) return true // keep unknowns, only block india signals above
+        if (strictWestern) return westernCountries.any { country == it || country.contains(it) }
+        return true
     }
 
     private fun JSONObject.toSearchResponse(onlyType: TvType? = null, filterContent: Boolean = true, strictWestern: Boolean = false): SearchResponse? {
