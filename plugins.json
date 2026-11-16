@@ -18,5 +18,25 @@
         "description": "MovieBox (moviebox.ph) - movies and series, multi audio",
         "url": "https://raw.githubusercontent.com/Rennvol/cloudstream-moviebox/builds/MovieBox.cs3",
         "name": "MovieBox"
+    },
+    {
+        "fileHash": "sha256-c90e00bc35f4c4eb011f9a3dfe9a6f924941322ed1e279719450b71aeec8008f",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Rennvol/cloudstream-moviebox",
+        "fileSize": 40733,
+        "status": 3,
+        "language": "id",
+        "authors": [
+            "Rennvol"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "MovieBoxHD",
+        "description": "MovieBoxHD (moviebox.ph) - kategori sama web, termasuk India",
+        "url": "https://raw.githubusercontent.com/Rennvol/cloudstream-moviebox/builds/MovieBoxHD.cs3",
+        "name": "MovieBoxHD"
     }
 ]
