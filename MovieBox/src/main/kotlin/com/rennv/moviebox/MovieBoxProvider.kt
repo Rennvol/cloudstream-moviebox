@@ -250,18 +250,9 @@ class MovieBoxProvider : MainAPI() {
     private fun JSONArray.objects(): List<JSONObject> =
         (0 until length()).mapNotNull { optJSONObject(it) }
 
-    private val blockedCountries = setOf(
-        "india", "pakistan", "bangladesh", "nepal", "sri lanka", "nigeria", "egypt", "turkey", "türkiye"
-    )
-    private val allowedCountries = setOf(
+    private val europeCountries = setOf(
         "united states", "usa", "united kingdom", "uk", "canada", "australia", "new zealand",
-        "france", "germany", "spain", "italy", "ireland", "sweden", "norway", "denmark", "netherlands", "belgium", "austria", "switzerland", "poland", "portugal", "finland", "greece", "czech", "romania", "hungary", "iceland",
-        "indonesia", "south korea", "korea", "japan", "china", "hong kong", "taiwan", "thailand",
-        "philippines", "malaysia", "singapore", "vietnam"
-    )
-    private val westernCountries = setOf(
-        "united states", "usa", "united kingdom", "uk", "canada", "australia", "new zealand",
-        "france", "germany", "spain", "italy", "ireland", "sweden", "norway", "denmark", "netherlands", "belgium", "austria", "switzerland", "poland", "portugal", "finland", "greece", "czech", "romania", "hungary", "iceland"
+        "france", "germany", "spain", "italy", "ireland", "sweden", "norway", "denmark", "netherlands", "belgium", "austria", "switzerland", "poland", "portugal", "finland", "greece", "czech", "romania", "hungary", "iceland", "russia", "ukraine"
     )
 
     private fun JSONObject.allowedContent(strictWestern: Boolean = false): Boolean {
@@ -272,10 +263,10 @@ class MovieBoxProvider : MainAPI() {
         val hay = "$title $country $genre"
         val junk = listOf("india","pakistan","bangladesh","nepal","sri lanka","nigeria","egypt","turkey","türkiye","bollywood","hindi","tamil","telugu","malayalam","kannada","punjabi","bhojpuri","marathi","gujarati")
         if (junk.any { hay.contains(it) }) return false
-        if (country.isBlank()) return false // drop unknown/antah-berantah
-        if (strictWestern) return westernCountries.any { country == it || country.contains(it) }
+        if (country.isBlank()) return false
         if (genre.contains("anime")) return true
-        return allowedCountries.any { country == it || country.contains(it) }
+        // keep europe/western only (+ anime handled above)
+        return europeCountries.any { country == it || country.contains(it) }
     }
 
     private fun JSONObject.toSearchResponse(onlyType: TvType? = null, filterContent: Boolean = true, strictWestern: Boolean = false): SearchResponse? {
