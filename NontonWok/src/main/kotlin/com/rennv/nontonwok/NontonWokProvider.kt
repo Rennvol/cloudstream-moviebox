@@ -212,13 +212,42 @@ class NontonWokProvider : MainAPI() {
         val dataId = "$subjectId|$safePath|$contentType"
 
         return if (contentType == "series") {
-            // ponytail: episode list not in RSC payload; start with S1E1, upgrade when API found
-            val ep = newEpisode("$dataId|1|1") {
-                this.season = 1
-                this.episode = 1
-                this.name = "Episode 1"
+            val epList = mutableListOf<Episode>()
+            // Parse seasons/episodes from play page RSC payload (VideoPlayer props)
+            val playHtml = runCatching { fetchText("$mainUrl/play/$safePath") }.getOrNull().orEmpty()
+            val playBig = if (playHtml.isNotBlank()) extractNextF(playHtml) else ""
+            if (playBig.isNotBlank()) {
+                val seasonsMatch = Regex("""\\\"seasons\\\":\[(.*?)\]\\s*,\\s*\\\"autoPlay\\\"""", RegexOption.DOT_MATCHES_ALL).find(playBig)
+                    ?: Regex(""""seasons":\[(.*?)\]\s*,\s*"autoPlay"""", RegexOption.DOT_MATCHES_ALL).find(playBig)
+                val seasonsStr = seasonsMatch?.groupValues?.get(1).orEmpty()
+                    .replace("\\\"", "\"")
+                if (seasonsStr.isNotBlank()) {
+                    val seasonRe = Regex("""\{"season":(\d+),"episodeCount":\d+,"episodes":\[(.*?)]\}""")
+                    seasonRe.findAll(seasonsStr).forEach { sm ->
+                        val sn = sm.groupValues[1].toIntOrNull() ?: return@forEach
+                        val epsStr = sm.groupValues[2]
+                        Regex("""\{"season":\d+,"episode":(\d+),"available":(true|false)\}""").findAll(epsStr).forEach { em ->
+                            val en = em.groupValues[1].toIntOrNull() ?: return@forEach
+                            val avail = em.groupValues[2] == "true"
+                            if (avail) {
+                                epList += newEpisode("$dataId|$sn|$en") {
+                                    this.season = sn
+                                    this.episode = en
+                                    this.name = "Episode $en"
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            newTvSeriesLoadResponse(title, dataId, TvType.TvSeries, listOf(ep)) {
+            if (epList.isEmpty()) {
+                epList += newEpisode("$dataId|1|1") {
+                    this.season = 1
+                    this.episode = 1
+                    this.name = "Episode 1"
+                }
+            }
+            newTvSeriesLoadResponse(title, dataId, TvType.TvSeries, epList) {
                 this.posterUrl = poster
                 this.plot = desc
                 this.year = year
