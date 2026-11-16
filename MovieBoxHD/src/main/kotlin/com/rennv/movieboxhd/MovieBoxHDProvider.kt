@@ -389,6 +389,7 @@ class MovieBoxHDProvider : MainAPI() {
                         this.season = se
                         this.episode = ep
                         this.name = "S$se E$ep"
+                        this.description = "subjectId=$sid se=$se ep=$ep | https://fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=$se&ep=$ep"
                     }
                 }
             }
@@ -403,10 +404,10 @@ class MovieBoxHDProvider : MainAPI() {
                 val ep = if (rawEp >= 10000) rawEp % 10000 else if (rawEp >= 100) rawEp % 100 else rawEp
                 val key = "$id|$se|$ep"
                 if (!seen.add(key)) continue
-                episodes += newEpisode(key) { this.season = se; this.episode = ep; this.name = "S$se E$ep" }
+                episodes += newEpisode(key) { this.season = se; this.episode = ep; this.name = "S$se E$ep"; this.description = "subjectId=$sid se=$se ep=$ep" }
             }
             if (episodes.isEmpty()) {
-                episodes += newEpisode("$id|1|1") { this.season = 1; this.episode = 1; this.name = "Episode 1" }
+                episodes += newEpisode("$id|1|1") { this.season = 1; this.episode = 1; this.name = "Episode 1"; this.description = "subjectId=$id se=1 ep=1" }
             }
         }
 
@@ -447,7 +448,6 @@ class MovieBoxHDProvider : MainAPI() {
         val season = parts.getOrNull(1)?.toIntOrNull() ?: 0
         val episode = parts.getOrNull(2)?.toIntOrNull() ?: 0
         var found = false
-        throw Exception("HD debug v16: data=$data id=$id se=$season ep=$episode")
 
         suspend fun collectFromPlayInfo(sid: String, se: Int, ep: Int) {
             val play = dataOf("/wefeed-mobile-bff/subject-api/play-info?subjectId=$sid&se=$se&ep=$ep") ?: return
