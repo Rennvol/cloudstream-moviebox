@@ -47,7 +47,7 @@ subprojects {
     }
 
     android {
-        namespace = "com.rennv.moviebox"
+        namespace = "com.rennv.${project.name.lowercase()}"
 
         defaultConfig {
             minSdk = 21
