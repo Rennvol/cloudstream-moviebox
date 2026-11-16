@@ -551,6 +551,8 @@ class MovieBoxHDProvider : MainAPI() {
         else INFER_TYPE,
     ) {
         this.quality = if (quality > 0) quality else Qualities.Unknown.value
-        if (signCookie.isNotBlank()) this.headers = mapOf("Cookie" to signCookie)
+        val h = mutableMapOf("Referer" to "https://moviebox.ph/", "User-Agent" to UA)
+        if (signCookie.isNotBlank()) h["Cookie"] = signCookie
+        this.headers = h
     }
 }
