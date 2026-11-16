@@ -40,10 +40,10 @@
         "name": "MovieBoxHD"
     },
     {
-        "fileHash": "sha256-4c4e4b109bf9bb5ce79ed2e09d516220df46df563da94fb549002a236223d9a1",
+        "fileHash": "sha256-59c2c8d1ac259441bd516a190fb5f92762b39102d4005791b632858b10bb7510",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Rennvol/cloudstream-moviebox",
-        "fileSize": 26783,
+        "fileSize": 28958,
         "status": 3,
         "language": "id",
         "authors": [
@@ -53,7 +53,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 1,
+        "version": -1,
         "internalName": "NontonWok",
         "description": "NontonWok (nonton.work) - movies and series, Indonesian content",
         "url": "https://raw.githubusercontent.com/Rennvol/cloudstream-moviebox/builds/NontonWok.cs3",
