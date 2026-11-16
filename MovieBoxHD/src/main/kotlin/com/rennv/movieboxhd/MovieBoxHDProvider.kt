@@ -340,7 +340,7 @@ class MovieBoxHDProvider : MainAPI() {
         val sid0 = data.optString("subjectId").ifBlank { data.optString("id") }.ifBlank { id }
         val hasDetail = data.length() > 0 && (titleRaw.isNotBlank() || sid0.isNotBlank())
 
-        val title = titleRaw.substringBefore("[").trim().ifBlank { "MovieBox $id" }
+        val title = titleRaw.substringBefore("[").trim().ifBlank { "MovieBoxHD $id" }
         val description = data.optString("description")
         val releaseDate = data.optString("releaseDate")
         val year = releaseDate.take(4).toIntOrNull()
