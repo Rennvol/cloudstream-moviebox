@@ -447,6 +447,7 @@ class MovieBoxHDProvider : MainAPI() {
         val season = parts.getOrNull(1)?.toIntOrNull() ?: 0
         val episode = parts.getOrNull(2)?.toIntOrNull() ?: 0
         var found = false
+        throw Exception("HD debug v16: data=$data id=$id se=$season ep=$episode")
 
         suspend fun collectFromPlayInfo(sid: String, se: Int, ep: Int) {
             val play = dataOf("/wefeed-mobile-bff/subject-api/play-info?subjectId=$sid&se=$se&ep=$ep") ?: return
