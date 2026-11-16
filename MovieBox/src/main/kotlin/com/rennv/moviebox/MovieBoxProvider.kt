@@ -103,15 +103,11 @@ class MovieBoxProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     override val mainPage = mainPageOf(
-        // categoryType ids come from tab/ranking-list -> data.categoryList
         "ranking:4809349160627587984" to "Trending",
         "list:1" to "Movies",
         "list:2" to "Series",
-        "ranking:4380734070238626200" to "K-Drama",
-        "ranking:5283462032510044280" to "Indo Drama",
-        "ranking:8624142774394406504" to "C-Drama",
-        "ranking:8617025562613270856" to "Anime",
         "ranking:5307082080063488480" to "Western",
+        "ranking:8617025562613270856" to "Anime",
     )
 
     // ---------------------------------------------------------------- signing
@@ -259,26 +255,26 @@ class MovieBoxProvider : MainAPI() {
     )
     private val allowedCountries = setOf(
         "united states", "usa", "united kingdom", "uk", "canada", "australia", "new zealand",
-        "france", "germany", "spain", "italy", "ireland", "sweden", "norway", "denmark", "netherlands", "belgium", "austria", "switzerland",
+        "france", "germany", "spain", "italy", "ireland", "sweden", "norway", "denmark", "netherlands", "belgium", "austria", "switzerland", "poland", "portugal", "finland", "greece", "czech", "romania", "hungary", "iceland",
         "indonesia", "south korea", "korea", "japan", "china", "hong kong", "taiwan", "thailand",
         "philippines", "malaysia", "singapore", "vietnam"
     )
     private val westernCountries = setOf(
         "united states", "usa", "united kingdom", "uk", "canada", "australia", "new zealand",
-        "france", "germany", "spain", "italy", "ireland", "sweden", "norway", "denmark", "netherlands", "belgium", "austria", "switzerland"
+        "france", "germany", "spain", "italy", "ireland", "sweden", "norway", "denmark", "netherlands", "belgium", "austria", "switzerland", "poland", "portugal", "finland", "greece", "czech", "romania", "hungary", "iceland"
     )
 
     private fun JSONObject.allowedContent(strictWestern: Boolean = false): Boolean {
         val title = optString("title").ifBlank { optString("name") }.trim()
         if (title.isBlank()) return false
         val country = optString("countryName").trim().lowercase()
-        val hay = (title + " " + country + " " + optString("genre")).lowercase()
-        if (blockedCountries.any { country.contains(it) || hay.contains(it) }) return false
-        if (country.isBlank()) {
-            // no country: drop obvious junk/region hints, keep otherwise
-            return !hay.contains("bollywood") && !hay.contains("hindi") && !hay.contains("tamil") && !hay.contains("telugu") && !hay.contains("malayalam")
-        }
+        val genre = optString("genre").lowercase()
+        val hay = "$title $country $genre"
+        val junk = listOf("india","pakistan","bangladesh","nepal","sri lanka","nigeria","egypt","turkey","türkiye","bollywood","hindi","tamil","telugu","malayalam","kannada","punjabi","bhojpuri","marathi","gujarati")
+        if (junk.any { hay.contains(it) }) return false
+        if (country.isBlank()) return false // drop unknown/antah-berantah
         if (strictWestern) return westernCountries.any { country == it || country.contains(it) }
+        if (genre.contains("anime")) return true
         return allowedCountries.any { country == it || country.contains(it) }
     }
 
