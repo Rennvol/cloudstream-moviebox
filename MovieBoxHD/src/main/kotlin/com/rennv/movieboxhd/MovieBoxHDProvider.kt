@@ -338,7 +338,7 @@ class MovieBoxHDProvider : MainAPI() {
 
         val title = titleRaw.substringBefore("[").trim().ifBlank { "MovieBoxHD $id" }
         val description = data.optString("description")
-        val plot = listOf(description.takeIf { it.isNotBlank() }, "subjectId: $sid0").filterNotNull().joinToString("\n\n")
+        val plot = listOf("subjectId: $sid0", description.takeIf { it.isNotBlank() }).filterNotNull().joinToString("\n\n")
         val releaseDate = data.optString("releaseDate")
         val year = releaseDate.take(4).toIntOrNull()
         val tags = data.optString("genre").split(",").map { it.trim() }.filter { it.isNotEmpty() }

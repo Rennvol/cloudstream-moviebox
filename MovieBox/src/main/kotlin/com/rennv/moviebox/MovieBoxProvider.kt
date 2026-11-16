@@ -338,6 +338,7 @@ class MovieBoxProvider : MainAPI() {
 
         val title = titleRaw.substringBefore("[").trim().ifBlank { "MovieBox $id" }
         val description = data.optString("description")
+        val plot = listOf("subjectId: $sid0", description.takeIf { it.isNotBlank() }).filterNotNull().joinToString("\n\n")
         val releaseDate = data.optString("releaseDate")
         val year = releaseDate.take(4).toIntOrNull()
         val tags = data.optString("genre").split(",").map { it.trim() }.filter { it.isNotEmpty() }
@@ -355,7 +356,7 @@ class MovieBoxProvider : MainAPI() {
         if (!isSeries) {
             return newMovieLoadResponse(title, "$id|0|0", TvType.Movie, "$id|0|0") {
                 this.posterUrl = poster
-                this.plot = description
+                this.plot = plot
                 this.year = year
                 this.tags = tags
                 this.score = score
@@ -410,7 +411,7 @@ class MovieBoxProvider : MainAPI() {
 
         return newTvSeriesLoadResponse(title, "$id|0|0", TvType.TvSeries, episodes) {
             this.posterUrl = poster
-            this.plot = description
+            this.plot = plot
             this.year = year
             this.tags = tags
             this.score = score
