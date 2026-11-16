@@ -542,7 +542,7 @@ class MovieBoxHDProvider : MainAPI() {
         url = url,
         type = ExtractorLinkType.VIDEO,
     ) {
-        this.headers = mapOf("Referer" to mainUrl)
+        this.headers = mapOf("Referer" to "https://moviebox.ph/", "User-Agent" to UA)
         this.quality = if (quality > 0) quality else Qualities.Unknown.value
     }
 
