@@ -38,7 +38,7 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * MovieBoxHD (moviebox.ph) provider - kategori sama web.
+ * MovieBox (moviebox.ph) provider.
  *
  * Talks to the mobile BFF (wefeed-mobile-bff) which every request signs:
  *  - x-client-token : "<ms>,<md5(reversed ms)>"
@@ -106,20 +106,14 @@ class MovieBoxHDProvider : MainAPI() {
         "ranking:4809349160627587984" to "Trending",
         "list:1" to "Movies",
         "list:2" to "Series",
-        "filter:2|{\"classify\":\"All\",\"country\":\"United States\",\"genre\":\"All\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "Hollywood",
-        "filter:5|{\"classify\":\"All\",\"country\":\"United States\",\"genre\":\"All\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "Western TV",
-        "filter:5|{\"country\":\"Korea\",\"genre\":\"All\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "K-Drama",
-        "filter:5|{\"classify\":\"All\",\"country\":\"China\",\"genre\":\"All\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "C-Drama",
-        "filter:5|{\"classify\":\"All\",\"country\":\"All\",\"genre\":\"Anime\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "Anime",
-        "filter:2|{\"classify\":\"All\",\"country\":\"Indonesia\",\"genre\":\"All\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "Indo Film",
-        "filter:5|{\"country\":\"Indonesia\",\"genre\":\"All\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "Indo Drama",
-        "filter:5|{\"classify\":\"Indonesian dub\",\"country\":\"All\",\"genre\":\"All\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "Indo Dubbed",
-        "filter:2|{\"classify\":\"All\",\"country\":\"Indonesia\",\"genre\":\"Horror\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "Horror Indo",
-        "filter:5|{\"classify\":\"All\",\"country\":\"India\",\"genre\":\"All\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "India Drama",
-        "filter:2|{\"classify\":\"All\",\"country\":\"India\",\"genre\":\"All\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "India Film",
-        "filter:5|{\"classify\":\"All\",\"country\":\"Thailand\",\"genre\":\"All\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "Thai-Drama",
-        "filter:5|{\"classify\":\"All\",\"country\":\"Japan\",\"genre\":\"All\",\"sort\":\"Hottest\",\"year\":\"All\"}" to "J-Drama",
-        "filter:7|{\"sort\":\"Hottest\"}" to "Short TV",
+        "ranking:4380734070238626200" to "K-Drama",
+        "ranking:5283462032510044280" to "Indo Drama",
+        "ranking:8624142774394406504" to "C-Drama",
+        "ranking:8617025562613270856" to "Anime",
+        "ranking:5307082080063488480" to "Western",
+        "ranking:5243634416492162328" to "Thai-Drama",
+        "ranking:5692654647810388816" to "J-Drama",
+        "ranking:5166486432344441960" to "Malay Drama",
     )
 
     // ---------------------------------------------------------------- signing
@@ -222,9 +216,9 @@ class MovieBoxHDProvider : MainAPI() {
                 return JSONObject(response.body?.string() ?: "{}")
             }
             lastError = "HTTP ${response.code}: ${(response.body?.string() ?: "").take(200)}"
-            if (response.code !in listOf(400, 401, 403, 407, 429, 500, 502, 503, 504)) break
+            if (response.code !in listOf(403, 407, 429, 500, 502, 503, 504)) break
         }
-        throw Exception("MovieBox request failed: $lastError")
+        throw Exception("MovieBoxHD request failed: $lastError")
     }
 
     private fun absorbToken(xUser: String) {
@@ -262,15 +256,28 @@ class MovieBoxHDProvider : MainAPI() {
     private fun JSONArray.objects(): List<JSONObject> =
         (0 until length()).mapNotNull { optJSONObject(it) }
 
+    private val westernCountries = setOf(
+        "united states", "usa", "united kingdom", "uk", "canada", "australia", "new zealand",
+        "france", "germany", "spain", "italy", "ireland", "sweden", "norway", "denmark", "netherlands", "belgium", "austria", "switzerland", "poland", "portugal", "finland", "greece", "czech", "romania", "hungary", "iceland", "russia", "ukraine"
+    )
+
     private fun JSONObject.allowedContent(strictWestern: Boolean = false): Boolean {
         val title = optString("title").ifBlank { optString("name") }.trim()
-        return title.isNotBlank()
+        if (title.isBlank()) return false
+        val country = optString("countryName").trim().lowercase()
+        val genre = optString("genre").lowercase()
+        val hay = "$title $country $genre"
+        val indiaJunk = listOf("india","pakistan","bangladesh","nepal","sri lanka","bollywood","hindi","tamil","telugu","malayalam","kannada","punjabi","bhojpuri","marathi","gujarati")
+        if (indiaJunk.any { hay.contains(it) }) return false
+        if (country.isBlank()) return true // keep unknowns, only block india signals above
+        if (strictWestern) return westernCountries.any { country == it || country.contains(it) }
+        return true
     }
 
-    private fun JSONObject.toSearchResponse(onlyType: TvType? = null): SearchResponse? {
+    private fun JSONObject.toSearchResponse(onlyType: TvType? = null, filterContent: Boolean = true, strictWestern: Boolean = false): SearchResponse? {
         val id = optString("subjectId").takeIf { it.isNotBlank() } ?: return null
         val title = optString("title").ifBlank { optString("name") }.trim().takeIf { it.isNotBlank() } ?: return null
-        if (!allowedContent()) return null
+        if (filterContent && !allowedContent(strictWestern)) return null
         val type = if (optInt("subjectType", 1) in listOf(2, 7)) TvType.TvSeries else TvType.Movie
         if (onlyType != null && type != onlyType) return null
         val cover = optJSONObject("cover")?.optString("url")?.takeIf { it.startsWith("http") }
@@ -283,47 +290,32 @@ class MovieBoxHDProvider : MainAPI() {
     // ------------------------------------------------------------------ API
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        return try {
-            val (kind, value) = request.data.split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
-            val onlyType = when {
-                kind == "list" && value.startsWith("1") -> TvType.Movie
-                kind == "list" && value.startsWith("2") -> TvType.TvSeries
-                else -> null
-            }
-            val raw = when (kind) {
-                "ranking" -> subjectsOf(
-                    dataOf("/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=$value&page=$page&perPage=20")
-                )
-                "filter" -> {
-                    val tabId = value.substringBefore("|").ifBlank { "2" }
-                    val filterJson = value.substringAfter("|", "{}")
-                    val base = try { JSONObject(filterJson) } catch (_: Exception) { JSONObject() }
-                    val body = JSONObject().put("page", page).put("perPage", 20).put("tabId", tabId)
-                    for (k in base.keys()) body.put(k, base.get(k))
-                    if (!body.has("classify")) body.put("classify", "All")
-                    if (!body.has("country")) body.put("country", "All")
-                    if (!body.has("genre")) body.put("genre", "All")
-                    if (!body.has("year")) body.put("year", "All")
-                    if (!body.has("sort")) body.put("sort", "Hottest")
-                    subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body.toString()))
-                }
-                else -> {
-                    val channelId = value.substringAfter("|", "1").ifBlank { "1" }
-                    val body = JSONObject()
-                        .put("page", page).put("perPage", 20)
-                        .put("channelId", channelId)
-                        .put("classify", "All").put("country", "All")
-                        .put("year", "All").put("genre", "All").put("sort", "Latest")
-                        .toString()
-                    subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body))
-                }
-            }
-            val sorted = if (kind == "list") raw.sortedByDescending { it.optString("releaseDate") } else raw
-            val list = sorted.mapNotNull { it.toSearchResponse(onlyType) }
-            newHomePageResponse(listOf(HomePageList(request.name, list)))
-        } catch (_: Exception) {
-            newHomePageResponse(listOf(HomePageList(request.name, emptyList())))
+        val (kind, value) = request.data.split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+        val onlyType = when {
+            kind == "list" && value.startsWith("1") -> TvType.Movie
+            kind == "list" && value.startsWith("2") -> TvType.TvSeries
+            else -> null
         }
+        val strictWestern = kind == "ranking" && value == "5307082080063488480"
+        val raw = when (kind) {
+            "ranking" -> subjectsOf(
+                dataOf("/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=$value&page=$page&perPage=20")
+            )
+            else -> {
+                val channelId = value.substringAfter("|", "1").ifBlank { "1" }
+                val body = JSONObject()
+                    .put("page", page).put("perPage", 20)
+                    .put("channelId", channelId)
+                    .put("classify", "All").put("country", "All")
+                    .put("year", "All").put("genre", "All").put("sort", "Latest")
+                    .toString()
+                subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body))
+            }
+        }
+        val sorted = if (kind == "list") raw.sortedByDescending { it.optString("releaseDate") } else raw
+        val list = sorted.mapNotNull { it.toSearchResponse(onlyType, filterContent = true, strictWestern = strictWestern) }
+
+        return newHomePageResponse(listOf(HomePageList(request.name, list)))
     }
 
     override suspend fun search(query: String, page: Int): SearchResponseList {
@@ -331,7 +323,7 @@ class MovieBoxHDProvider : MainAPI() {
             .put("page", page).put("perPage", 20).put("keyword", query)
             .toString()
         val list = subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/search/v2", "POST", body))
-            .mapNotNull { it.toSearchResponse() }
+            .mapNotNull { it.toSearchResponse(filterContent = true) }
         return list.toNewSearchResponseList()
     }
 
@@ -523,8 +515,7 @@ class MovieBoxHDProvider : MainAPI() {
             if (episode > 0 && !found) collectFromPlayInfo(sid, 0, 0)
         }
 
-        if (!found) throw Exception("No playable link found for this title")
-        return true
+        return found
     }
 
     private suspend fun captionCallback(caption: JSONObject, subtitleCallback: (SubtitleFile) -> Unit) {
@@ -542,7 +533,7 @@ class MovieBoxHDProvider : MainAPI() {
         url = url,
         type = ExtractorLinkType.VIDEO,
     ) {
-        this.headers = mapOf("Referer" to "https://moviebox.ph/", "User-Agent" to UA)
+        this.headers = mapOf("Referer" to mainUrl)
         this.quality = if (quality > 0) quality else Qualities.Unknown.value
     }
 
@@ -556,8 +547,6 @@ class MovieBoxHDProvider : MainAPI() {
         else INFER_TYPE,
     ) {
         this.quality = if (quality > 0) quality else Qualities.Unknown.value
-        val h = mutableMapOf("Referer" to "https://moviebox.ph/", "User-Agent" to UA)
-        if (signCookie.isNotBlank()) h["Cookie"] = signCookie
-        this.headers = h
+        if (signCookie.isNotBlank()) this.headers = mapOf("Cookie" to signCookie)
     }
 }
