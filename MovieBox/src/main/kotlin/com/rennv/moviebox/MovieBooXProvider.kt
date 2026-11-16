@@ -38,7 +38,7 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * MovieBox (moviebox.ph) provider.
+ * MovieBooX (moviebox.ph) provider.
  *
  * Talks to the mobile BFF (wefeed-mobile-bff) which every request signs:
  *  - x-client-token : "<ms>,<md5(reversed ms)>"
@@ -47,7 +47,7 @@ import javax.crypto.spec.SecretKeySpec
  * An anonymous bearer token comes back in the `x-user` response header and is
  * required by search / play-info / resource.
  */
-class MovieBoxProvider : MainAPI() {
+class MovieBooXProvider : MainAPI() {
 
     companion object {
         private val HOSTS = listOf(
@@ -96,7 +96,7 @@ class MovieBoxProvider : MainAPI() {
         private var bearer: String? = null
     }
 
-    override var name = "MovieBox"
+    override var name = "MovieBooX"
     override var mainUrl = HOSTS[0]
     override var lang = "id"
     override val hasMainPage = true
@@ -218,7 +218,7 @@ class MovieBoxProvider : MainAPI() {
             lastError = "HTTP ${response.code}: ${(response.body?.string() ?: "").take(200)}"
             if (response.code !in listOf(403, 407, 429, 500, 502, 503, 504)) break
         }
-        throw Exception("MovieBox request failed: $lastError")
+        throw Exception("MovieBooX request failed: $lastError")
     }
 
     private fun absorbToken(xUser: String) {
@@ -336,7 +336,7 @@ class MovieBoxProvider : MainAPI() {
         val sid0 = data.optString("subjectId").ifBlank { data.optString("id") }.ifBlank { id }
         val hasDetail = data.length() > 0 && (titleRaw.isNotBlank() || sid0.isNotBlank())
 
-        val baseTitle = titleRaw.substringBefore("[").trim().ifBlank { "MovieBox $id" }
+        val baseTitle = titleRaw.substringBefore("[").trim().ifBlank { "MovieBooX $id" }
         val title = "$baseTitle [$sid0]"
         val description = data.optString("description")
         val plot = listOf("subjectId: $sid0", description.takeIf { it.isNotBlank() }).filterNotNull().joinToString("\n\n")

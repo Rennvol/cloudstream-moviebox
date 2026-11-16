@@ -1,8 +1,8 @@
-version = 13
+version = 14
 
 cloudstream {
     language = "id"
-    description = "MovieBox (moviebox.ph) - movies and series, multi audio"
+    description = "MovieBooX (moviebox.ph) - movies and series, multi audio"
     authors = listOf("Rennvol")
 
     /**
