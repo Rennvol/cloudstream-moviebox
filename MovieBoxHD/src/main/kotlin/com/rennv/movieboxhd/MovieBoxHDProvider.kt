@@ -431,6 +431,13 @@ class MovieBoxHDProvider : MainAPI() {
         return Regex("(\\d+)").find(value)?.groupValues?.get(1)?.toIntOrNull()
     }
 
+    private fun isPlayableUrl(url: String): Boolean {
+        if (!url.startsWith("http")) return false
+        val u = url.lowercase()
+        // ponytail: drop known placeholder/ad clips; extend if log shows other markers
+        return !u.contains("deprecation") && !u.contains("placeholder") && !u.contains("anti_piracy") && !u.contains("antipiracy") && !u.contains("/ad/")
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -448,7 +455,7 @@ class MovieBoxHDProvider : MainAPI() {
             val streams = play.optJSONArray("streams")?.objects()
                 ?: play.optJSONObject("data")?.optJSONArray("streams")?.objects() ?: emptyList()
             streams.forEach { stream ->
-                val link = stream.optString("url").takeIf { it.startsWith("http") } ?: return@forEach
+                val link = stream.optString("url").takeIf { isPlayableUrl(it) } ?: return@forEach
                 val quality = stream.optString("resolutions")
                     .split(",").firstOrNull()?.trim()?.toIntOrNull() ?: 0
                 callback(newSignedStream(link, quality, stream.optString("signCookie")))
@@ -475,12 +482,12 @@ class MovieBoxHDProvider : MainAPI() {
                 val resSeason = res.optInt("se", 0)
                 if (episode > 0 && resEpisode != 0 && resEpisode != episode) return@forEach
                 if (episode > 0 && resSeason != 0 && resSeason != season) return@forEach
-                val link = res.optString("resourceLink").takeIf { it.startsWith("http") }
-                    ?: res.optString("url").takeIf { it.startsWith("http") } ?: return@forEach
+                val link = res.optString("resourceLink").takeIf { isPlayableUrl(it) }
+                    ?: res.optString("url").takeIf { isPlayableUrl(it) } ?: return@forEach
                 callback(newVideoLink(link, res.optInt("resolution", detector.optInt("resolution", 0))))
                 found = true
             }
-            val direct = detector.optString("downloadUrl").takeIf { it.startsWith("http") }
+            val direct = detector.optString("downloadUrl").takeIf { isPlayableUrl(it) }
             if (direct != null) {
                 callback(newVideoLink(direct, 0))
                 found = true
@@ -498,8 +505,8 @@ class MovieBoxHDProvider : MainAPI() {
             val wanted = listOf(season * 10000 + episode, season * 100 + episode)
             val chosen = list.filter { it.optInt("episode", 0) in wanted }.ifEmpty { list }
             chosen.forEach { item ->
-                val link = item.optString("resourceLink").takeIf { it.startsWith("http") }
-                    ?: item.optString("url").takeIf { it.startsWith("http") } ?: return@forEach
+                val link = item.optString("resourceLink").takeIf { isPlayableUrl(it) }
+                    ?: item.optString("url").takeIf { isPlayableUrl(it) } ?: return@forEach
                 callback(newVideoLink(link, item.optInt("resolution", 0)))
                 found = true
                 item.optJSONArray("extCaptions")?.objects()?.forEach { captionCallback(it, subtitleCallback) }
