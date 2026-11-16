@@ -262,15 +262,28 @@ class MovieBoxHDProvider : MainAPI() {
     private fun JSONArray.objects(): List<JSONObject> =
         (0 until length()).mapNotNull { optJSONObject(it) }
 
+    private val westernCountries = setOf(
+        "united states", "usa", "united kingdom", "uk", "canada", "australia", "new zealand",
+        "france", "germany", "spain", "italy", "ireland", "sweden", "norway", "denmark", "netherlands", "belgium", "austria", "switzerland", "poland", "portugal", "finland", "greece", "czech", "romania", "hungary", "iceland", "russia", "ukraine"
+    )
+
     private fun JSONObject.allowedContent(strictWestern: Boolean = false): Boolean {
         val title = optString("title").ifBlank { optString("name") }.trim()
-        return title.isNotBlank()
+        if (title.isBlank()) return false
+        val country = optString("countryName").trim().lowercase()
+        val genre = optString("genre").lowercase()
+        val hay = "$title $country $genre"
+        val indiaJunk = listOf("india","pakistan","bangladesh","nepal","sri lanka","bollywood","hindi","tamil","telugu","malayalam","kannada","punjabi","bhojpuri","marathi","gujarati")
+        if (indiaJunk.any { hay.contains(it) }) return false
+        if (country.isBlank()) return true // keep unknowns, only block india signals above
+        if (strictWestern) return westernCountries.any { country == it || country.contains(it) }
+        return true
     }
 
-    private fun JSONObject.toSearchResponse(onlyType: TvType? = null): SearchResponse? {
+    private fun JSONObject.toSearchResponse(onlyType: TvType? = null, filterContent: Boolean = true, strictWestern: Boolean = false): SearchResponse? {
         val id = optString("subjectId").takeIf { it.isNotBlank() } ?: return null
         val title = optString("title").ifBlank { optString("name") }.trim().takeIf { it.isNotBlank() } ?: return null
-        if (!allowedContent()) return null
+        if (filterContent && !allowedContent(strictWestern)) return null
         val type = if (optInt("subjectType", 1) in listOf(2, 7)) TvType.TvSeries else TvType.Movie
         if (onlyType != null && type != onlyType) return null
         val cover = optJSONObject("cover")?.optString("url")?.takeIf { it.startsWith("http") }
@@ -289,23 +302,11 @@ class MovieBoxHDProvider : MainAPI() {
             kind == "list" && value.startsWith("2") -> TvType.TvSeries
             else -> null
         }
+        val strictWestern = kind == "ranking" && value == "5307082080063488480"
         val raw = when (kind) {
             "ranking" -> subjectsOf(
                 dataOf("/wefeed-mobile-bff/tab/ranking-list?tabId=0&categoryType=$value&page=$page&perPage=20")
             )
-            "filter" -> {
-                val tabId = value.substringBefore("|").ifBlank { "2" }
-                val filterJson = value.substringAfter("|", "{}")
-                val base = try { JSONObject(filterJson) } catch (_: Exception) { JSONObject() }
-                val body = JSONObject().put("page", page).put("perPage", 20).put("tabId", tabId)
-                for (k in base.keys()) body.put(k, base.get(k))
-                if (!body.has("classify")) body.put("classify", "All")
-                if (!body.has("country")) body.put("country", "All")
-                if (!body.has("genre")) body.put("genre", "All")
-                if (!body.has("year")) body.put("year", "All")
-                if (!body.has("sort")) body.put("sort", "Hottest")
-                subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body.toString()))
-            }
             else -> {
                 val channelId = value.substringAfter("|", "1").ifBlank { "1" }
                 val body = JSONObject()
@@ -318,7 +319,8 @@ class MovieBoxHDProvider : MainAPI() {
             }
         }
         val sorted = if (kind == "list") raw.sortedByDescending { it.optString("releaseDate") } else raw
-        val list = sorted.mapNotNull { it.toSearchResponse(onlyType) }
+        val list = sorted.mapNotNull { it.toSearchResponse(onlyType, filterContent = true, strictWestern = strictWestern) }
+
         return newHomePageResponse(listOf(HomePageList(request.name, list)))
     }
 
@@ -327,7 +329,7 @@ class MovieBoxHDProvider : MainAPI() {
             .put("page", page).put("perPage", 20).put("keyword", query)
             .toString()
         val list = subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/search/v2", "POST", body))
-            .mapNotNull { it.toSearchResponse() }
+            .mapNotNull { it.toSearchResponse(filterContent = true) }
         return list.toNewSearchResponseList()
     }
 
