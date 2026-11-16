@@ -304,7 +304,7 @@ class MovieBoxHDProvider : MainAPI() {
                 if (!body.has("genre")) body.put("genre", "All")
                 if (!body.has("year")) body.put("year", "All")
                 if (!body.has("sort")) body.put("sort", "Hottest")
-                subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body))
+                subjectsOf(dataOf("/wefeed-mobile-bff/subject-api/list", "POST", body.toString()))
             }
             else -> {
                 val channelId = value.substringAfter("|", "1").ifBlank { "1" }
