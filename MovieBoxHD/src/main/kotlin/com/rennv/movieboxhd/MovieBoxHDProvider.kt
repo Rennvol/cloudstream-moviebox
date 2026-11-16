@@ -523,7 +523,8 @@ class MovieBoxHDProvider : MainAPI() {
             if (episode > 0 && !found) collectFromPlayInfo(sid, 0, 0)
         }
 
-        return found
+        if (!found) throw Exception("No playable link found for this title")
+        return true
     }
 
     private suspend fun captionCallback(caption: JSONObject, subtitleCallback: (SubtitleFile) -> Unit) {
