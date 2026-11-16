@@ -1,9 +1,9 @@
 [
     {
-        "fileHash": "sha256-1222754f5ffad21c608ccaf7fe83428c10eda9228301be0457fc88f5b95cce0a",
+        "fileHash": "sha256-c5d179bf05b89b48662451c593472b6e1dff3bc5b2fc51ca3b9427db20fc8a32",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Rennvol/cloudstream-moviebox",
-        "fileSize": 40827,
+        "fileSize": 41020,
         "status": 3,
         "language": "id",
         "authors": [
@@ -13,7 +13,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 8,
+        "version": 9,
         "internalName": "MovieBox",
         "description": "MovieBox (moviebox.ph) - movies and series, multi audio",
         "url": "https://raw.githubusercontent.com/Rennvol/cloudstream-moviebox/builds/MovieBox.cs3",
