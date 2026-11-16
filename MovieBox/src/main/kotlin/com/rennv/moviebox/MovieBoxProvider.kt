@@ -328,8 +328,8 @@ class MovieBoxProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val parts = url.split("|")
-        val id = parts[0]
+        val raw = url.substringBefore("|")
+        val id = Regex("""\d{10,}""").find(raw)?.value ?: raw
         val root = request("/wefeed-mobile-bff/subject-api/get?subjectId=$id")
         val data = root.optJSONObject("data") ?: root.optJSONObject("subject") ?: JSONObject()
         val titleRaw = data.optString("title").ifBlank { data.optString("name") }
