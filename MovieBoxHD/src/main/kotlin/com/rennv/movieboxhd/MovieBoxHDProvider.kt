@@ -389,7 +389,7 @@ class MovieBoxHDProvider : MainAPI() {
                         this.season = se
                         this.episode = ep
                         this.name = "S$se E$ep"
-                        this.description = "subjectId=$sid se=$se ep=$ep | https://fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=$se&ep=$ep"
+                        this.description = "subjectId=$sid se=$se ep=$ep\nweb: fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=$se&ep=$ep"
                     }
                 }
             }
@@ -404,10 +404,10 @@ class MovieBoxHDProvider : MainAPI() {
                 val ep = if (rawEp >= 10000) rawEp % 10000 else if (rawEp >= 100) rawEp % 100 else rawEp
                 val key = "$id|$se|$ep"
                 if (!seen.add(key)) continue
-                episodes += newEpisode(key) { this.season = se; this.episode = ep; this.name = "S$se E$ep"; this.description = "subjectId=$id se=$se ep=$ep" }
+                episodes += newEpisode(key) { this.season = se; this.episode = ep; this.name = "S$se E$ep"; this.description = "subjectId=$id se=$se ep=$ep\nweb: fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=$se&ep=$ep" }
             }
             if (episodes.isEmpty()) {
-                episodes += newEpisode("$id|1|1") { this.season = 1; this.episode = 1; this.name = "Episode 1"; this.description = "subjectId=$id se=1 ep=1" }
+                episodes += newEpisode("$id|1|1") { this.season = 1; this.episode = 1; this.name = "Episode 1"; this.description = "subjectId=$id se=1 ep=1\nweb: fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=1&ep=1" }
             }
         }
 
