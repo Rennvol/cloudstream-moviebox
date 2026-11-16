@@ -517,7 +517,12 @@ class MovieBoxHDProvider : MainAPI() {
             if (episode > 0 && !found) collectFromPlayInfo(sid, 0, 0)
         }
 
-        return found
+        if (!found) {
+            val hasDetail = detail != null
+            val detCount = detail?.optJSONArray("resourceDetectors")?.length() ?: 0
+            throw Exception("HD no links: id=$id se=$season ep=$episode detail=$hasDetail det=$detCount sids=${resourceSids.joinToString(",")}")
+        }
+        return true
     }
 
     private suspend fun captionCallback(caption: JSONObject, subtitleCallback: (SubtitleFile) -> Unit) {
