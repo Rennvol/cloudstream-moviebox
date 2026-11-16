@@ -550,4 +550,3 @@ class MovieBoxProvider : MainAPI() {
         if (signCookie.isNotBlank()) this.headers = mapOf("Cookie" to signCookie)
     }
 }
-}
