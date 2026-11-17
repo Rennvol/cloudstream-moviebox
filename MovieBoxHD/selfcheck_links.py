@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -48,6 +49,13 @@ if __name__ == "__main__":
     assert len(real) >= 4, f"no real detector links: {len(real)}"
     with urllib.request.urlopen(urllib.request.Request(real[0], headers={"Range": "bytes=0-1023"}), timeout=30) as r:
         assert r.status == 206 and r.headers.get("Content-Length") == "1024", "real link not streamable"
+    # Regression guard: CDN 429s when a Referer header is attached.
+    try:
+        urllib.request.urlopen(urllib.request.Request(real[0], headers={"Range": "bytes=0-1023", "Referer": HOST}), timeout=30)
+    except urllib.error.HTTPError as e:
+        assert e.code == 429, f"unexpected Referer status: {e.code}"
+    else:
+        raise AssertionError("Referer no longer rejected; recheck CDN policy")
     bumper = request(f"/wefeed-mobile-bff/subject-api/play-info?subjectId={SID}&se=0&ep=0")["data"]["streams"][0]["url"]
     assert not playable(bumper), f"bumper not filtered: {bumper}"
     assert f"{SID}|1|1".split("|")[0].isdigit(), "episode key must stay raw"

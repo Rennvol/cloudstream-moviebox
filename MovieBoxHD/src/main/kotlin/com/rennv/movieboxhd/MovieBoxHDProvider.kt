@@ -542,7 +542,7 @@ class MovieBoxHDProvider : MainAPI() {
         url = url,
         type = ExtractorLinkType.VIDEO,
     ) {
-        this.headers = mapOf("Referer" to mainUrl)
+        // CDN rejects requests carrying Referer (429); keep headers empty
         this.quality = if (quality > 0) quality else Qualities.Unknown.value
     }
 
