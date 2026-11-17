@@ -1,9 +1,9 @@
 [
     {
-        "fileHash": "sha256-67563744e4ba71ed20c9ee08f222b642c7d6beca7329ba1e31db2cea314fbe9d",
+        "fileHash": "sha256-bd54613c73b1fd810b90e98b721e893e554cdbb2b9bf049487d9a747643e9d49",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Rennvol/cloudstream-moviebox",
-        "fileSize": 44915,
+        "fileSize": 48858,
         "status": 3,
         "language": "id",
         "authors": [
@@ -13,17 +13,17 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 17,
+        "version": 18,
         "internalName": "MovieBox",
         "description": "MovieBooX (moviebox.ph) - movies and series, multi audio",
         "url": "https://raw.githubusercontent.com/Rennvol/cloudstream-moviebox/builds/MovieBox.cs3",
         "name": "MovieBox"
     },
     {
-        "fileHash": "sha256-13bebba368752d8ee135b0f8728177c0768666a919c8944113cadcd18fffb04e",
+        "fileHash": "sha256-1b4a2f2ec73cab7850fc8a30525f9378488621803c5a8de9a6058a5944b2abfb",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Rennvol/cloudstream-moviebox",
-        "fileSize": 44708,
+        "fileSize": 48592,
         "status": 3,
         "language": "id",
         "authors": [
@@ -33,7 +33,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 21,
+        "version": 22,
         "internalName": "MovieBoxHD",
         "description": "MovieBoxHD (moviebox.ph) - kategori sama web, termasuk India",
         "url": "https://raw.githubusercontent.com/Rennvol/cloudstream-moviebox/builds/MovieBoxHD.cs3",
