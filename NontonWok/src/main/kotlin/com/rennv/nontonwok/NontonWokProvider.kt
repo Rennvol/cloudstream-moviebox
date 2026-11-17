@@ -209,7 +209,7 @@ class NontonWokProvider : MainAPI() {
 
         return if (contentType == "series") {
             val epList = mutableListOf<Episode>()
-            // Parse seasons/episodes from /play RSC payload (VideoPlayer props)
+            // fix=false: newEpisode(String) applies fixUrl() by default, which prefixes mainUrl and breaks the pipe-delimited data
             if (big.isNotBlank()) {
                 val seasonsMatch = Regex("""\\\"seasons\\\":\[(.*?)\]\\s*,\\s*\\\"autoPlay\\\"""", RegexOption.DOT_MATCHES_ALL).find(big)
                     ?: Regex(""""seasons":\[(.*?)\]\s*,\s*"autoPlay"""", RegexOption.DOT_MATCHES_ALL).find(big)
@@ -224,22 +224,22 @@ class NontonWokProvider : MainAPI() {
                             val en = em.groupValues[1].toIntOrNull() ?: return@forEach
                             val avail = em.groupValues[2] == "true"
                             if (avail) {
-                                epList += newEpisode("$dataId|$sn|$en") {
+                                epList += newEpisode("$dataId|$sn|$en", {
                                     this.season = sn
                                     this.episode = en
                                     this.name = "Episode $en"
-                                }
+                                }, false)
                             }
                         }
                     }
                 }
             }
             if (epList.isEmpty()) {
-                epList += newEpisode("$dataId|1|1") {
+                epList += newEpisode("$dataId|1|1", {
                     this.season = 1
                     this.episode = 1
                     this.name = "Episode 1"
-                }
+                }, false)
             }
             // ponytail: cast/actors not exposed in RSC payload; metadata from /watch fallback below
             var metaPoster = poster
