@@ -507,7 +507,8 @@ class MovieBoxHDProvider : MainAPI() {
                 stream.optString("resolutions").split(",")
                     .mapNotNull { it.trim().toIntOrNull()?.takeIf { q -> q > 0 } }
                     .ifEmpty { listOf(0) }
-                    .forEach { q -> callback(newVideoLink(link, q, mapOf("Referer" to "$WEB_HOST/") // series H5 CDN needs movie-box.co Referer; api6 mobile CDN rejects it)) }
+                    // series H5 CDN needs movie-box.co Referer; api6 mobile CDN rejects it
+                    .forEach { q -> callback(newVideoLink(link, q, mapOf("Referer" to "$WEB_HOST/"))) }
                 found = true
             }
         }
