@@ -350,15 +350,19 @@ class NontonWokProvider : MainAPI() {
             emit(pickUrl(s), q, s.optString("resolution").ifBlank { "hls" })
         }
 
-        // captions best-effort: try stream ids
+        // captions best-effort: first stream's id, site returns data[] of relative /api/captions/file URLs
         val streamId = root.optJSONArray("streams")?.optJSONObject(0)?.optString("id").orEmpty()
         if (streamId.isNotBlank()) {
             val capUrl = "$mainUrl/api/captions?subjectId=$subjectId&detailPath=$detailPath&streamId=$streamId&format=mp4"
             val caps = runCatching { JSONObject(app.get(capUrl, headers = mapOf("User-Agent" to UA, "Referer" to "$mainUrl/")).text) }.getOrNull()
-            caps?.optJSONObject("data")?.optJSONArray("list")?.objects()?.forEach { c ->
-                val u = c.optString("url").takeIf { it.startsWith("http") } ?: return@forEach
-                val lang = c.optString("language").ifBlank { c.optString("lan").ifBlank { "Sub" } }
-                subtitleCallback(newSubtitleFile(u, lang))
+            caps?.optJSONArray("data")?.objects()?.forEach { c ->
+                val path = c.optString("url")
+                if (path.isBlank()) return@forEach
+                val lang = c.optString("language").ifBlank { c.optString("label") }.ifBlank { "Sub" }
+                    .let { if (it == "in_id") "id" else it }
+                val full = if (path.startsWith("http")) path else "$mainUrl$path"
+                // caption file endpoint 403 without browser UA
+                subtitleCallback(newSubtitleFile(lang, full) { headers = mapOf("User-Agent" to UA) })
             }
         }
 
