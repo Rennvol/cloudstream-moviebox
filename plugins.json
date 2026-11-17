@@ -9,12 +9,12 @@
         "name": "MovieBooX",
         "packageName": "com.rennv.moviebox",
         "description": "MovieBooX (moviebox.ph) - movies and series, multi audio",
-        "version": "18.0.0"
+        "version": "19.0.0"
     },
     {
         "name": "MovieBoxHD",
         "packageName": "com.rennv.movieboxhd",
         "description": "MovieBoxHD (moviebox.ph) - kategori sama web, termasuk India",
-        "version": "22.0.0"
+        "version": "23.0.0"
     }
 ]
