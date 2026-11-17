@@ -327,8 +327,7 @@ class NontonWokProvider : MainAPI() {
                     type = type,
                 ) {
                     this.quality = q
-                    this.referer = mainUrl
-                    // cdn-proxy returns 403 without browser UA (direct CDN returns 429)
+                    // cdn-proxy checks User-Agent; duplicate casing from `referer` is harmless
                     this.headers = mapOf("User-Agent" to UA, "Referer" to "$mainUrl/")
                 }
             )
