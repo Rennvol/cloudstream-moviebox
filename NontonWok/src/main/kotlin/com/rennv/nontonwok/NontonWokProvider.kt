@@ -328,6 +328,8 @@ class NontonWokProvider : MainAPI() {
                 ) {
                     this.quality = q
                     this.referer = mainUrl
+                    // cdn-proxy returns 403 without browser UA (direct CDN returns 429)
+                    this.headers = mapOf("User-Agent" to UA, "Referer" to "$mainUrl/")
                 }
             )
             found = true
@@ -347,11 +349,6 @@ class NontonWokProvider : MainAPI() {
         root.optJSONArray("hls")?.objects()?.forEach { s ->
             val q = s.optString("resolution").replace("p", "").toIntOrNull() ?: 0
             emit(pickUrl(s), q, s.optString("resolution").ifBlank { "hls" })
-        }
-        root.optJSONArray("dash")?.objects()?.forEach { s ->
-            val q = s.optString("resolution").split(",").firstOrNull()?.trim()?.toIntOrNull() ?: 0
-            val u = if (s.optBoolean("proxyRequired", false)) pickUrl(s) else s.optString("url")
-            emit(u, q, "dash ${s.optString("resolution")}", isDash = true)
         }
 
         // captions best-effort: try stream ids
