@@ -13,6 +13,8 @@ KEY = base64.b64decode(base64.b64decode("NzZpUmwwN3MweFNOOWpxbUVXQXQ3OUVCSlp1bEl
 UA = "com.community.oneroom/50020042 (Linux; U; Android 14; en_IN; 22101316G; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
 CI = json.dumps({"package_name": "com.community.oneroom", "version_name": "3.0.03.0529.03", "version_code": 50020042, "os": "android", "os_version": "14", "device_id": "0" * 32, "install_store": "official", "gaid": "1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d", "brand": "xiaomi", "model": "22101316G", "system_language": "en", "net": "NETWORK_WIFI", "region": "US", "timezone": "Asia/Jakarta", "sp_code": ""}, separators=(",", ":"))
 SID = "7576700355313287640"  # Parasite
+SERIES_SID = "1959098083447292888"  # Alas Roban: The Series
+WEB = "https://movie-box.co"
 token = [None]
 
 
@@ -42,6 +44,23 @@ def playable(url):
     return u.startswith("http") and "macdn.aoneroom.com/other/" not in u
 
 
+def web_play(sid, se, ep):
+    detail = request(f"/wefeed-mobile-bff/subject-api/get?subjectId={sid}")["data"]
+    dp = detail["detailUrl"].rstrip("/").split("/")[-1]
+    q = urllib.parse.urlencode({
+        "subjectId": sid, "se": se, "ep": ep, "detailPath": dp, "streamSignType": 1,
+        "supportCodecs[hevc]": 1, "supportCodecs[h264]": 1,
+    })
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36",
+        "Origin": WEB, "Referer": f"{WEB}/movies/{dp}?id={sid}&type=/movie/detail&detailSe=&detailEp=&lang=en",
+        "Accept": "application/json", "x-client-info": '{"timezone":"Asia/Calcutta"}',
+        "x-request-lang": "en", "x-vip-restrict": "0", "x-no-high-risk-restrict": "0", "x-source": "",
+    }
+    url = f"{WEB}/wefeed-h5api-bff/subject/play?{q}"
+    return json.load(urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30))
+
+
 if __name__ == "__main__":
     request("/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version=", bootstrap=True)
     detail = request(f"/wefeed-mobile-bff/subject-api/get?subjectId={SID}")["data"]
@@ -59,4 +78,10 @@ if __name__ == "__main__":
     bumper = request(f"/wefeed-mobile-bff/subject-api/play-info?subjectId={SID}&se=0&ep=0")["data"]["streams"][0]["url"]
     assert not playable(bumper), f"bumper not filtered: {bumper}"
     assert f"{SID}|1|1".split("|")[0].isdigit(), "episode key must stay raw"
-    print(f"OK: {len(real)} real links, bumper filtered, episode key raw")
+    streams = [s for s in web_play(SERIES_SID, 1, 1)["data"]["streams"] if playable(s["url"])]
+    assert streams, "series H5 returned no playable stream"
+    with urllib.request.urlopen(urllib.request.Request(streams[0]["url"], headers={
+        "Range": "bytes=0-1023", "Referer": f"{WEB}/",
+    }), timeout=30) as r:
+        assert r.status == 206 and r.headers.get("Content-Length") == "1024", "series stream not streamable"
+    print(f"OK: {len(real)} movie links, series H5 streamable, bumper filtered, episode key raw")

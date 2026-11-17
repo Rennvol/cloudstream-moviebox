@@ -50,6 +50,7 @@ import javax.crypto.spec.SecretKeySpec
 class MovieBooXProvider : MainAPI() {
 
     companion object {
+        private const val WEB_HOST = "https://movie-box.co"
         private val HOSTS = listOf(
             "https://api6.aoneroom.com",
             "https://api5.aoneroom.com",
@@ -237,6 +238,29 @@ class MovieBooXProvider : MainAPI() {
     private suspend fun dataOf(pathWithQuery: String, method: String = "GET", body: String? = null): JSONObject? {
         val root = request(pathWithQuery, method, body)
         return root.optJSONObject("data")
+    }
+
+    // Series streams live on the web H5 API, not on the signed mobile API.
+    private suspend fun webPlay(sid: String, se: Int, ep: Int, detailPath: String): JSONObject? {
+        if (detailPath.isBlank()) return null
+        val q = "subjectId=$sid&se=$se&ep=$ep&detailPath=$detailPath" +
+            "&streamSignType=1&supportCodecs%5Bhevc%5D=1&supportCodecs%5Bh264%5D=1"
+        val response = try {
+            app.get("$WEB_HOST/wefeed-h5api-bff/subject/play?$q", headers = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36",
+                "Origin" to WEB_HOST,
+                "Referer" to "$WEB_HOST/movies/$detailPath?id=$sid&type=/movie/detail&detailSe=&detailEp=&lang=en",
+                "Accept" to "application/json",
+                "x-client-info" to "{\"timezone\":\"Asia/Calcutta\"}",
+                "x-request-lang" to "en",
+                "x-vip-restrict" to "0",
+                "x-no-high-risk-restrict" to "0",
+                "x-source" to "",
+            ))
+        } catch (_: Exception) { return null }
+        if (response.code != 200) return null
+        return try { JSONObject(response.body?.string().orEmpty()).optJSONObject("data") }
+        catch (_: Exception) { null }
     }
 
     // ------------------------------------------------------------------ parse
@@ -481,6 +505,18 @@ class MovieBooXProvider : MainAPI() {
         // 1. Movies (and some series) expose ready-made files here.
         val detail = dataOf("/wefeed-mobile-bff/subject-api/get?subjectId=$id")
             ?: dataOf("/wefeed-mobile-bff/subject-api/get?subjectId=$id&detail=1")
+        val detailPath = detail?.optString("detailUrl").orEmpty().substringAfterLast("/")
+        if (season > 0 && episode > 0 && detailPath.isNotBlank()) {
+            webPlay(id, season, episode, detailPath)?.optJSONArray("streams")?.objects()?.forEach { stream ->
+                val link = stream.optString("url").takeIf { isPlayableUrl(it) } ?: return@forEach
+                stream.optString("resolutions").split(",")
+                    .mapNotNull { it.trim().toIntOrNull()?.takeIf { q -> q > 0 } }
+                    .ifEmpty { listOf(0) }
+                    .forEach { q -> callback(newVideoLink(link, q, mapOf("Referer" to "$WEB_HOST/"))) }
+                found = true
+            }
+        }
+
         detail?.optJSONArray("resourceDetectors")?.objects()?.forEach { detector ->
             detector.optJSONArray("resolutionList")?.objects()?.forEach { res ->
                 val resEpisode = res.optInt("episode", 0)
@@ -536,14 +572,15 @@ class MovieBooXProvider : MainAPI() {
         subtitleCallback(newSubtitleFile(lang, url))
     }
 
-    private suspend fun newVideoLink(url: String, quality: Int) = newExtractorLink(
+    private suspend fun newVideoLink(url: String, quality: Int, headers: Map<String, String> = emptyMap()) = newExtractorLink(
         source = name,
         name = "$name ${if (quality > 0) "${quality}p" else "auto"}",
         url = url,
         type = ExtractorLinkType.VIDEO,
     ) {
-        // CDN rejects requests carrying Referer (429); keep headers empty
+        // api6 CDN 429s with Referer; H5 series CDN requires movie-box.co Referer.
         this.quality = if (quality > 0) quality else Qualities.Unknown.value
+        if (headers.isNotEmpty()) this.headers = headers
     }
 
     private suspend fun newSignedStream(url: String, quality: Int, signCookie: String) = newExtractorLink(
