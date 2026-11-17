@@ -385,12 +385,12 @@ class MovieBoxHDProvider : MainAPI() {
                 for (ep in 1..maxEp) {
                     val key = "$sid|$se|$ep"
                     if (!seen.add(key)) continue
-                    episodes += newEpisode(key) {
+                    episodes += newEpisode(key, {
                         this.season = se
                         this.episode = ep
                         this.name = "S$se E$ep"
                         this.description = "subjectId=$sid se=$se ep=$ep\nweb: fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=$se&ep=$ep"
-                    }
+                    }, false)
                 }
             }
         }
@@ -404,10 +404,10 @@ class MovieBoxHDProvider : MainAPI() {
                 val ep = if (rawEp >= 10000) rawEp % 10000 else if (rawEp >= 100) rawEp % 100 else rawEp
                 val key = "$id|$se|$ep"
                 if (!seen.add(key)) continue
-                episodes += newEpisode(key) { this.season = se; this.episode = ep; this.name = "S$se E$ep"; this.description = "subjectId=$id se=$se ep=$ep\nweb: fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=$se&ep=$ep" }
+                episodes += newEpisode(key, { this.season = se; this.episode = ep; this.name = "S$se E$ep"; this.description = "subjectId=$id se=$se ep=$ep\nweb: fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=$se&ep=$ep" }, false)
             }
             if (episodes.isEmpty()) {
-                episodes += newEpisode("$id|1|1") { this.season = 1; this.episode = 1; this.name = "Episode 1"; this.description = "subjectId=$id se=1 ep=1\nweb: fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=1&ep=1" }
+                episodes += newEpisode("$id|1|1", { this.season = 1; this.episode = 1; this.name = "Episode 1"; this.description = "subjectId=$id se=1 ep=1\nweb: fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=1&ep=1" }, false)
             }
         }
 
@@ -434,7 +434,8 @@ class MovieBoxHDProvider : MainAPI() {
         if (!url.startsWith("http")) return false
         val u = url.lowercase()
         // ponytail: drop known placeholder/ad clips; extend if log shows other markers
-        return !u.contains("deprecation") && !u.contains("placeholder") && !u.contains("anti_piracy") && !u.contains("antipiracy") && !u.contains("/ad/")
+        return !u.contains("deprecation") && !u.contains("placeholder") && !u.contains("anti_piracy") && !u.contains("antipiracy") && !u.contains("/ad/") &&
+            !u.contains("macdn.aoneroom.com/other/") // ponytail: site 23s bumper; extend when CDN path changes
     }
 
     override suspend fun loadLinks(
@@ -532,7 +533,7 @@ class MovieBoxHDProvider : MainAPI() {
             .ifBlank { caption.optString("lanName") }
             .ifBlank { caption.optString("lan") }
             .ifBlank { "Unknown" }
-        subtitleCallback(newSubtitleFile(url, lang))
+        subtitleCallback(newSubtitleFile(lang, url))
     }
 
     private suspend fun newVideoLink(url: String, quality: Int) = newExtractorLink(
