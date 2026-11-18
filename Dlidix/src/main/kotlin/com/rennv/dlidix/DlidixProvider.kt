@@ -16,7 +16,6 @@ import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mainPageOf
 import com.lagradost.cloudstream3.newEpisode
-import com.lagradost.cloudstream3.newExtractorLink
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.newMovieLoadResponse
 import com.lagradost.cloudstream3.newMovieSearchResponse
@@ -26,6 +25,7 @@ import com.lagradost.cloudstream3.toNewSearchResponseList
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import kotlinx.coroutines.delay
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -120,10 +120,10 @@ class DlidixProvider : MainAPI() {
         val slug = parts.getOrNull(1).orEmpty()
         val root = api(if (parts[0] == "series") "/series/$slug" else "/movies/$slug")
         val title = root.optString("title").ifBlank { root.optString("originalTitle") }.ifBlank { "Dlidix" }
-        val plot = listOf(
-            root.optString("overview"),
+        val plot = listOfNotNull(
+            root.optString("overview").takeIf { it.isNotBlank() },
             root.optString("tagline").takeIf { it.isNotBlank() }?.let { "Tagline: $it" },
-        ).filter { it.isNotBlank() }.joinToString("\n\n")
+        ).joinToString("\n\n")
         val poster = image(root.optString("posterPath"))
         val year = (root.optString("releaseDate").ifBlank { root.optString("firstAirDate") }).take(4).toIntOrNull()
         val score = root.optString("voteAverage").toDoubleOrNull()?.let { Score.from10(it.toString()) }
@@ -183,7 +183,7 @@ class DlidixProvider : MainAPI() {
     private fun resolve(base: String, path: String): String =
         if (path.startsWith("http")) path else URI(base).resolve(path).toString()
 
-    private fun addCaptions(captions: JSONArray?, base: String, subtitleCallback: (SubtitleFile) -> Unit) {
+    private suspend fun addCaptions(captions: JSONArray?, base: String, subtitleCallback: (SubtitleFile) -> Unit) {
         for (c in objArray(captions)) {
             val path = c.optString("path").ifBlank { c.optString("url") }
             if (path.isBlank()) continue
