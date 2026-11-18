@@ -16,5 +16,11 @@
         "packageName": "com.rennv.movieboxhd",
         "description": "MovieBoxHD (moviebox.ph) - kategori sama web, termasuk India",
         "version": "23.0.0"
+    },
+    {
+        "name": "Dlidix",
+        "packageName": "com.rennv.dlidix",
+        "description": "Dlidix (idlixku.com) - film & series, subtitle, HLS hingga 1080p",
+        "version": "1.0.0"
     }
 ]
