@@ -1,6 +1,6 @@
 [
     {
-        "fileHash": "sha256-c6ce3804aacb3abf1cf64f9b1137fb6b63a58d3243c9aa7d4e7f7413a6773468",
+        "fileHash": "sha256-09cb116a508233def8c4afbc0fa54886657b9f6a0ed390da4eae67cc26214b07",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Rennvol/cloudstream-moviebox",
         "fileSize": 24713,
@@ -13,7 +13,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 1,
+        "version": 2,
         "internalName": "Dlidix",
         "description": "Dlidix (idlixku.com) - film & series, subtitle, HLS hingga 1080p",
         "url": "https://raw.githubusercontent.com/Rennvol/cloudstream-moviebox/builds/Dlidix.cs3",
