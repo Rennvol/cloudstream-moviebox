@@ -192,7 +192,7 @@ class DlidixProvider : MainAPI() {
         }
     }
 
-    private fun addLink(
+    private suspend fun addLink(
         url: String,
         quality: Int,
         name: String,
