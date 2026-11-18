@@ -1,3 +1,8 @@
 {
   "name": "Rennvol MovieBox Repo",
-  "descr
+  "description": "MovieBox, MovieBoxHD & Dlidix (idlixku.com)",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/Rennvol/cloudstream-moviebox/builds/plugins.json"
+  ]
+}
