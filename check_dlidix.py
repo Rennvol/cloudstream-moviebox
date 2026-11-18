@@ -4,7 +4,7 @@ import pathlib
 import urllib.error
 import urllib.request
 
-API = "https://api.idlixku.com/api"
+API = "https://z3.idlixku.com/api"
 UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36"
 
 
@@ -31,11 +31,12 @@ def demo():
         get("/watch/play-info/movie/" + movie["id"])
     except urllib.error.HTTPError as e:
         assert e.code == 403, f"play-info HTTP {e.code}"
-    # Kontrak yang dipakai provider: gate/claim -> redeem -> HLS + subtitle.
+    # Kontrak yang dipakai provider: play-info (3 host) -> redeem -> HLS + subtitle.
     src = pathlib.Path("Dlidix/src/main/kotlin/com/rennv/dlidix/DlidixProvider.kt").read_text()
-    for token in ('"gateToken"', '"claim"', '"redeemUrl"', '"subtitles"', 'RESOLUTION=', '"path"'):
+    for token in ('"claim"', '"redeemUrl"', '"subtitles"', 'RESOLUTION=', 'newSubtitleFile', 'PLAY_HOSTS', 'addEpisodes'):
         assert token in src, f"provider kehilangan {token}"
-    print("OK: homepage, search, detail, season, play-info 403, kontrak subtitle/1080p")
+    assert '"gateToken"' not in src, "provider masih pakai gate lama"
+    print("OK: homepage, search, detail, season, play-info 403, kontrak episode/subtitle/1080p")
 
 
 if __name__ == "__main__":

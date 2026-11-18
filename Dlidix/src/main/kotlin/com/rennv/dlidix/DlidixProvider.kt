@@ -26,7 +26,6 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import kotlinx.coroutines.delay
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
@@ -35,19 +34,22 @@ import java.net.URI
 
 /**
  * Dlidix / IDLIX (z3.idlixku.com). Public JSON API, no login.
- * Playback: play-info -> (optional countdown + claim) -> redeem -> HLS master.
+ * Playback: play-info -> redeem -> HLS master + subtitles.
  */
 class DlidixProvider : MainAPI() {
     companion object {
         private const val WEB = "https://z3.idlixku.com"
-        private const val API = "https://api.idlixku.com/api"
+        private const val API = "https://z3.idlixku.com/api"
         private const val IMG = "https://image.tmdb.org/t/p/w500"
+        private const val UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         private val HEADERS = mapOf(
-            "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            "User-Agent" to UA,
             "Accept" to "application/json",
             "Origin" to WEB,
             "Referer" to "$WEB/",
         )
+        private val MEDIA_HEADERS = mapOf("User-Agent" to UA)
+        private val PLAY_HOSTS = listOf(WEB, "https://z1.idlixku.com", "https://api.idlixku.com")
     }
 
     override var name = "Dlidix"
@@ -64,15 +66,21 @@ class DlidixProvider : MainAPI() {
         "/movies?sort=rating&page=" to "Film Rating Tertinggi",
     )
 
-    private suspend fun api(path: String, method: String = "GET", body: String? = null): JSONObject {
+    private suspend fun api(
+        path: String,
+        body: String? = null,
+        headers: Map<String, String> = HEADERS,
+    ): JSONObject {
         val url = if (path.startsWith("http")) path else "$API$path"
-        val res = if (body == null) app.get(url, headers = HEADERS)
+        val res = if (body == null) app.get(url, headers = headers)
         else app.post(
             url,
-            headers = HEADERS,
+            headers = headers,
             requestBody = body.toRequestBody("application/json; charset=utf-8".toMediaType()),
         )
-        return JSONObject(res.text)
+        val text = res.text
+        if (res.code != 200) throw Exception("Dlidix HTTP ${res.code}: ${text.take(120)}")
+        return JSONObject(text)
     }
 
     private fun image(path: String?): String? = when {
@@ -96,6 +104,7 @@ class DlidixProvider : MainAPI() {
 
     private fun JSONObject.toSearch(): SearchResponse? {
         val content = optJSONObject("content") ?: this
+        if (optString("contentType").isNotBlank()) content.put("contentType", optString("contentType"))
         val url = content.itemUrl() ?: return null
         val title = content.optString("title").ifBlank { content.optString("originalTitle") }.takeIf { it.isNotBlank() }
             ?: return null
@@ -153,20 +162,15 @@ class DlidixProvider : MainAPI() {
             it.optInt("seasonNumber", -1).takeIf { n -> n > 0 }
         }.ifEmpty { (1..root.optInt("numberOfSeasons", 0)).toList() }
         for (seasonNo in seasonNumbers) {
-            val seasonRoot = api("/series/$slug/season/$seasonNo")
-            val season = seasonRoot.optJSONObject("season") ?: seasonRoot
-            for (ep in objArray(season.optJSONArray("episodes"))) {
-                val epId = ep.optString("id").takeIf { it.isNotBlank() } ?: continue
-                val epNo = ep.optInt("episodeNumber", 0)
-                if (epNo <= 0) continue
-                episodes += newEpisode("$slug|$epId|$seasonNo", {
-                    this.season = seasonNo
-                    this.episode = epNo
-                    this.name = ep.optString("name").ifBlank { "Episode $epNo" }
-                    this.description = ep.optString("overview")
-                    this.posterUrl = image(ep.optString("stillPath"))
-                }, false)
+            try {
+                val seasonRoot = api("/series/$slug/season/$seasonNo")
+                addEpisodes(episodes, seasonRoot.optJSONObject("season") ?: seasonRoot, seasonNo)
+            } catch (_: Exception) {
+                // ponytail: satu season gagal jangan hapus season lain
             }
+        }
+        if (episodes.isEmpty()) {
+            root.optJSONObject("defaultSeason")?.let { addEpisodes(episodes, it, it.optInt("seasonNumber", 1)) }
         }
         if (episodes.isEmpty()) throw Exception("Dlidix: series tanpa episode: $slug")
 
@@ -180,6 +184,21 @@ class DlidixProvider : MainAPI() {
         }
     }
 
+    private fun addEpisodes(target: MutableList<Episode>, season: JSONObject, seasonNo: Int) {
+        for (ep in objArray(season.optJSONArray("episodes"))) {
+            val epId = ep.optString("id").takeIf { it.isNotBlank() } ?: continue
+            val epNo = ep.optInt("episodeNumber", 0)
+            if (epNo <= 0) continue
+            target += newEpisode("$seasonNo|$epId", {
+                this.season = seasonNo
+                this.episode = epNo
+                this.name = ep.optString("name").ifBlank { "Episode $epNo" }
+                this.description = ep.optString("overview")
+                this.posterUrl = image(ep.optString("stillPath"))
+            }, false)
+        }
+    }
+
     private fun resolve(base: String, path: String): String =
         if (path.startsWith("http")) path else URI(base).resolve(path).toString()
 
@@ -188,7 +207,9 @@ class DlidixProvider : MainAPI() {
             val path = c.optString("path").ifBlank { c.optString("url") }
             if (path.isBlank()) continue
             val lang = c.optString("lang").ifBlank { c.optString("label") }.ifBlank { "Unknown" }
-            subtitleCallback(newSubtitleFile(lang, resolve(base, path)))
+            subtitleCallback(newSubtitleFile(lang, resolve(base, path)) {
+                this.headers = MEDIA_HEADERS
+            })
         }
     }
 
@@ -205,7 +226,7 @@ class DlidixProvider : MainAPI() {
             type = ExtractorLinkType.M3U8,
         ) {
             this.quality = if (quality > 0) quality else Qualities.Unknown.value
-            this.headers = HEADERS
+            this.headers = MEDIA_HEADERS
         })
     }
 
@@ -216,33 +237,34 @@ class DlidixProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
         val parts = data.split("|")
-        val playInfo = if (parts[0] == "movie") {
-            val uuid = api("/movies/${parts.getOrNull(1).orEmpty()}").optString("id")
-            if (uuid.isBlank()) throw Exception("Dlidix: movie tidak ditemukan")
-            api("/watch/play-info/movie/$uuid")
-        } else {
-            val uuid = parts.getOrNull(1).orEmpty()
-            api("/watch/play-info/episode/$uuid")
-        }
+        val isMovie = parts[0] == "movie"
+        val uuid = if (isMovie) {
+            api("/movies/${parts.getOrNull(1).orEmpty()}").optString("id")
+        } else parts.getOrNull(1).orEmpty()
+        if (uuid.isBlank()) throw Exception("Dlidix: id play tidak ditemukan")
 
-        var claim = playInfo.optString("claim")
-        var redeemUrl = playInfo.optString("redeemUrl")
-        if (claim.isBlank() || redeemUrl.isBlank()) {
-            val token = playInfo.optString("gateToken")
-            if (token.isBlank()) throw Exception("Dlidix: play-info tanpa tautan (possible bot block)")
-            val wait = playInfo.optLong("unlockAt") - playInfo.optLong("serverNow")
-            if (wait in 1L..30_000L) delay(wait + 500)
-            val session = api(
-                "/watch/session/claim",
-                "POST",
-                JSONObject().put("gateToken", token).toString(),
-            )
-            claim = session.optString("claim")
-            redeemUrl = session.optString("redeemUrl")
+        val kind = if (isMovie) "movie" else "episode"
+        var playInfo: JSONObject? = null
+        var lastError: Exception? = null
+        for (host in PLAY_HOSTS) {
+            try {
+                val info = api("$host/api/watch/play-info/$kind/$uuid")
+                if (info.optString("claim").isNotBlank() && info.optString("redeemUrl").isNotBlank()) {
+                    playInfo = info
+                    break
+                }
+                lastError = Exception("Dlidix: play-info kosong dari $host")
+            } catch (e: Exception) {
+                lastError = e
+            }
         }
-        if (claim.isBlank() || redeemUrl.isBlank()) throw Exception("Dlidix: claim/redeem kosong")
+        if (playInfo == null) throw lastError ?: Exception("Dlidix: play-info gagal")
 
-        val play = api(redeemUrl, "POST", JSONObject().put("claim", claim).toString())
+        val play = api(
+            playInfo.optString("redeemUrl"),
+            JSONObject().put("claim", playInfo.optString("claim")).toString(),
+            MEDIA_HEADERS,
+        )
         val payload = play.optJSONObject("data") ?: play
         val master = payload.optString("url")
         if (master.isBlank()) throw Exception("Dlidix: redeem tanpa URL stream")
@@ -254,7 +276,7 @@ class DlidixProvider : MainAPI() {
         // Master playlist lists per-resolution variants; expose each so 1080p is selectable.
         try {
             var pending = 0
-            for (line in app.get(master, headers = HEADERS).text.lines()) {
+            for (line in app.get(master, headers = MEDIA_HEADERS).text.lines()) {
                 val trimmed = line.trim()
                 if (trimmed.startsWith("#EXT-X-STREAM-INF")) {
                     pending = Regex("RESOLUTION=\\d+x(\\d+)").find(trimmed)?.groupValues?.get(1)?.toIntOrNull()
