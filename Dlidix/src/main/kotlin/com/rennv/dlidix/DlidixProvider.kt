@@ -19,6 +19,7 @@ import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.newMovieLoadResponse
 import com.lagradost.cloudstream3.newMovieSearchResponse
+import com.lagradost.cloudstream3.newTvSeriesSearchResponse
 import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.newTvSeriesLoadResponse
 import com.lagradost.cloudstream3.toNewSearchResponseList
@@ -39,9 +40,8 @@ import java.net.URI
 class DlidixProvider : MainAPI() {
     companion object {
         private const val WEB = "https://z3.idlixku.com"
-        // z3 serves the site but blocks this host's /api from non-browser IPs.
-        // api.idlixku.com is the API origin named by the site's own Next.js bundle.
-        private const val API = "https://api.idlixku.com/api"
+        private const val API_HOST = "https://api.idlixku.com"
+        private const val API = "$API_HOST/api"
         private const val IMG = "https://image.tmdb.org/t/p/w500"
         private const val UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         private val HEADERS = mapOf(
@@ -51,7 +51,7 @@ class DlidixProvider : MainAPI() {
             "Referer" to "$WEB/",
         )
         private val MEDIA_HEADERS = mapOf("User-Agent" to UA)
-        private val PLAY_HOSTS = listOf(WEB, "https://z1.idlixku.com", "https://api.idlixku.com")
+        private val PLAY_HOSTS = listOf(API_HOST, WEB, "https://z1.idlixku.com")
     }
 
     override var name = "Dlidix"
@@ -110,7 +110,12 @@ class DlidixProvider : MainAPI() {
         val url = content.itemUrl() ?: return null
         val title = content.optString("title").ifBlank { content.optString("originalTitle") }.takeIf { it.isNotBlank() }
             ?: return null
-        return newMovieSearchResponse(title, url, content.type()) {
+        return if (content.type() == TvType.TvSeries) {
+            newTvSeriesSearchResponse(title, url, content.type()) {
+                posterUrl = image(content.optString("posterPath"))
+                year = (content.optString("releaseDate").ifBlank { content.optString("firstAirDate") }).take(4).toIntOrNull()
+            }
+        } else newMovieSearchResponse(title, url, content.type()) {
             posterUrl = image(content.optString("posterPath"))
             year = (content.optString("releaseDate").ifBlank { content.optString("firstAirDate") }).take(4).toIntOrNull()
         }
