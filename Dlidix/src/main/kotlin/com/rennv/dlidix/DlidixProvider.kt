@@ -39,7 +39,9 @@ import java.net.URI
 class DlidixProvider : MainAPI() {
     companion object {
         private const val WEB = "https://z3.idlixku.com"
-        private const val API = "https://z3.idlixku.com/api"
+        // z3 serves the site but blocks this host's /api from non-browser IPs.
+        // api.idlixku.com is the API origin named by the site's own Next.js bundle.
+        private const val API = "https://api.idlixku.com/api"
         private const val IMG = "https://image.tmdb.org/t/p/w500"
         private const val UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         private val HEADERS = mapOf(

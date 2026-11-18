@@ -4,7 +4,7 @@ import pathlib
 import urllib.error
 import urllib.request
 
-API = "https://z3.idlixku.com/api"
+API = "https://api.idlixku.com/api"
 UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36"
 
 
