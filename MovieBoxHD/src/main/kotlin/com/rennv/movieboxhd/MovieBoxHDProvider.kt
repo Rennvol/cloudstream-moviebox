@@ -23,6 +23,7 @@ import com.lagradost.cloudstream3.newMovieLoadResponse
 import com.lagradost.cloudstream3.newMovieSearchResponse
 import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.newTvSeriesLoadResponse
+import com.lagradost.cloudstream3.newTvSeriesSearchResponse
 import com.lagradost.cloudstream3.toNewSearchResponseList
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
@@ -311,6 +312,31 @@ class MovieBoxHDProvider : MainAPI() {
         }
     }
 
+    /** H5 web recommendations, unsigned. Non-fatal: empty list on any failure. */
+    private suspend fun fetchRecommendations(id: String): List<SearchResponse> = try {
+        val text = app.get(
+            "https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/recommend?subjectId=$id",
+            headers = mapOf("User-Agent" to "Mozilla/5.0"),
+        ).body?.string().orEmpty()
+        JSONObject(text).optJSONObject("data")?.optJSONArray("movieItems")?.objects()?.mapNotNull { item ->
+            val rid = item.optString("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val rname = item.optString("name").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val st = item.optString("subjectType")
+            val type = if (st.contains("serie", ignoreCase = true) || st.contains("tv", ignoreCase = true)) TvType.TvSeries else TvType.Movie
+            val poster = item.optString("cover").takeIf { it.startsWith("http") }
+            val ryear = Regex("\\d{4}").find(item.optString("tag"))?.value?.toIntOrNull()
+            if (type == TvType.TvSeries) newTvSeriesSearchResponse(rname, "$rid|0|0", type) {
+                this.posterUrl = poster
+                this.year = ryear
+            } else newMovieSearchResponse(rname, "$rid|0|0", type) {
+                this.posterUrl = poster
+                this.year = ryear
+            }
+        } ?: emptyList()
+    } catch (_: Exception) {
+        emptyList()
+    }
+
     // ------------------------------------------------------------------ API
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -372,6 +398,7 @@ class MovieBoxHDProvider : MainAPI() {
                     ActorData(Actor(n, staff.optString("avatarUrl")), roleString = staff.optString("character"))
                 }
             }?.distinctBy { it.actor.name } ?: emptyList()
+        val recommendations = fetchRecommendations(id)
 
         if (!isSeries) {
             return newMovieLoadResponse(title, "$id|0|0", TvType.Movie, "$id|0|0") {
@@ -382,13 +409,40 @@ class MovieBoxHDProvider : MainAPI() {
                 this.score = score
                 this.actors = actors
                 this.duration = parseDuration(data.optString("duration"))
+                this.recommendations = recommendations
             }
         }
 
         // Series: seasons come from season-info, one call per dub (language variant).
         val subjectIds = mutableListOf(id)
+        val dubNames = mutableMapOf<String, String>()
         data.optJSONArray("dubs")?.objects()?.forEach { dub ->
-            dub.optString("subjectId").takeIf { it.isNotBlank() && it !in subjectIds }?.let { subjectIds += it }
+            val dsid = dub.optString("subjectId").takeIf { it.isNotBlank() } ?: return@forEach
+            if (dsid !in subjectIds) subjectIds += dsid
+            if (!dub.optBoolean("original")) {
+                dub.optString("lanName").takeIf { it.isNotBlank() }?.let { dubNames[dsid] = it }
+            }
+        }
+
+        // Episode titles from the resource pager, shared across dubs.
+        // ponytail: cap 10 pages (~100 eps); later episodes fall back to S#E#
+        val epTitles = mutableMapOf<String, String>()
+        var page = 1
+        while (page <= 10) {
+            val res = dataOf("/wefeed-mobile-bff/subject-api/resource?subjectId=$id&se=1&ep=1&page=$page") ?: break
+            res.optJSONArray("list")?.objects()?.forEach { item ->
+                val se = item.optInt("se", 0)
+                val ep = item.optInt("ep", 0)
+                val t = item.optString("title").takeIf { it.isNotBlank() } ?: return@forEach
+                if (se > 0 && ep > 0) epTitles.putIfAbsent("$se|$ep", t)
+            }
+            if (res.optJSONObject("pager")?.optBoolean("hasMore") != true) break
+            page++
+        }
+        fun epName(sid: String, se: Int, ep: Int): String {
+            val base = epTitles["$se|$ep"] ?: "S$se E$ep"
+            val dub = dubNames[sid]
+            return if (dub.isNullOrBlank()) base else "$base ($dub)"
         }
 
         val episodes = mutableListOf<Episode>()
@@ -407,7 +461,7 @@ class MovieBoxHDProvider : MainAPI() {
                     episodes += newEpisode(key, {
                         this.season = se
                         this.episode = ep
-                        this.name = "S$se E$ep"
+                        this.name = epName(sid, se, ep)
                     }, false)
                 }
             }
@@ -422,7 +476,7 @@ class MovieBoxHDProvider : MainAPI() {
                 val ep = if (rawEp >= 10000) rawEp % 10000 else if (rawEp >= 100) rawEp % 100 else rawEp
                 val key = "$id|$se|$ep"
                 if (!seen.add(key)) continue
-                episodes += newEpisode(key, { this.season = se; this.episode = ep; this.name = "S$se E$ep" }, false)
+                episodes += newEpisode(key, { this.season = se; this.episode = ep; this.name = epName(id, se, ep) }, false)
             }
             if (episodes.isEmpty()) {
                 episodes += newEpisode("$id|1|1", { this.season = 1; this.episode = 1; this.name = "Episode 1" }, false)
@@ -436,6 +490,7 @@ class MovieBoxHDProvider : MainAPI() {
             this.tags = tags
             this.score = score
             this.actors = actors
+            this.recommendations = recommendations
         }
     }
 
