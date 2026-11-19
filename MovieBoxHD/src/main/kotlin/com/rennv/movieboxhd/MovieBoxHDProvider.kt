@@ -357,13 +357,8 @@ class MovieBoxHDProvider : MainAPI() {
         val root = request("/wefeed-mobile-bff/subject-api/get?subjectId=$id")
         val data = root.optJSONObject("data") ?: root.optJSONObject("subject") ?: JSONObject()
         val titleRaw = data.optString("title").ifBlank { data.optString("name") }
-        val sid0 = data.optString("subjectId").ifBlank { data.optString("id") }.ifBlank { id }
-        val hasDetail = data.length() > 0 && (titleRaw.isNotBlank() || sid0.isNotBlank())
-
-        val baseTitle = titleRaw.substringBefore("[").trim().ifBlank { "MovieBoxHD $id" }
-        val title = "$baseTitle [$sid0]"
-        val description = data.optString("description")
-        val plot = listOf("subjectId: $sid0", description.takeIf { it.isNotBlank() }).filterNotNull().joinToString("\n\n")
+        val title = titleRaw.substringBefore("[").trim().ifBlank { "MovieBoxHD" }
+        val plot = data.optString("description")
         val releaseDate = data.optString("releaseDate")
         val year = releaseDate.take(4).toIntOrNull()
         val tags = data.optString("genre").split(",").map { it.trim() }.filter { it.isNotEmpty() }
@@ -413,7 +408,6 @@ class MovieBoxHDProvider : MainAPI() {
                         this.season = se
                         this.episode = ep
                         this.name = "S$se E$ep"
-                        this.description = "subjectId=$sid se=$se ep=$ep\nweb: fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=$se&ep=$ep"
                     }, false)
                 }
             }
@@ -428,10 +422,10 @@ class MovieBoxHDProvider : MainAPI() {
                 val ep = if (rawEp >= 10000) rawEp % 10000 else if (rawEp >= 100) rawEp % 100 else rawEp
                 val key = "$id|$se|$ep"
                 if (!seen.add(key)) continue
-                episodes += newEpisode(key, { this.season = se; this.episode = ep; this.name = "S$se E$ep"; this.description = "subjectId=$id se=$se ep=$ep\nweb: fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=$se&ep=$ep" }, false)
+                episodes += newEpisode(key, { this.season = se; this.episode = ep; this.name = "S$se E$ep" }, false)
             }
             if (episodes.isEmpty()) {
-                episodes += newEpisode("$id|1|1", { this.season = 1; this.episode = 1; this.name = "Episode 1"; this.description = "subjectId=$id se=1 ep=1\nweb: fmoviesunblocked.net/spa/videoPlayPage/movies/$id?se=1&ep=1" }, false)
+                episodes += newEpisode("$id|1|1", { this.season = 1; this.episode = 1; this.name = "Episode 1" }, false)
             }
         }
 
