@@ -72,27 +72,31 @@ class MovieBoxHDProvider : MainAPI() {
             "com.community.oneroom/50020042 (Linux; U; Android 14; en_IN; $MODEL; " +
                 "Build/UD1A.230803.041; Cronet/145.0.7582.0)"
 
-        private val DEVICE_ID: String = (1..32)
-            .map { "0123456789abcdef".random() }
-            .joinToString("")
+        // The BFF soft-bans device_ids that make too many requests (406 "find no
+        // content"). Fresh identity per process, plus one rotation per request on
+        // 406/441, keeps long sessions alive without an app restart.
+        @Volatile private var clientInfo: String = newClientInfo()
 
-        private val CLIENT_INFO = JSONObject()
-            .put("package_name", "com.community.oneroom")
-            .put("version_name", "3.0.03.0529.03")
-            .put("version_code", 50020042)
-            .put("os", "android")
-            .put("os_version", "14")
-            .put("device_id", DEVICE_ID)
-            .put("install_store", "official")
-            .put("gaid", "1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d")
-            .put("brand", "xiaomi")
-            .put("model", MODEL)
-            .put("system_language", "en")
-            .put("net", "NETWORK_WIFI")
-            .put("region", "US")
-            .put("timezone", "Asia/Jakarta")
-            .put("sp_code", "")
-            .toString()
+        private fun newClientInfo(): String {
+            val deviceId = (1..32).map { "0123456789abcdef".random() }.joinToString("")
+            return JSONObject()
+                .put("package_name", "com.community.oneroom")
+                .put("version_name", "3.0.03.0529.03")
+                .put("version_code", 50020042)
+                .put("os", "android")
+                .put("os_version", "14")
+                .put("device_id", deviceId)
+                .put("install_store", "official")
+                .put("gaid", java.util.UUID.randomUUID().toString())
+                .put("brand", "xiaomi")
+                .put("model", MODEL)
+                .put("system_language", "en")
+                .put("net", "NETWORK_WIFI")
+                .put("region", "US")
+                .put("timezone", "Asia/Jakarta")
+                .put("sp_code", "")
+                .toString()
+        }
 
         @Volatile
         private var bearer: String? = null
@@ -185,40 +189,53 @@ class MovieBoxHDProvider : MainAPI() {
         val contentType = if (body != null) "application/json; charset=utf-8" else "application/json"
         var lastError: String? = null
 
-        for (host in HOSTS) {
-            val url = host + pathWithQuery
-            val ts = System.currentTimeMillis()
-            val headers = mutableMapOf(
-                "User-Agent" to UA,
-                "Accept" to accept,
-                "Content-Type" to contentType,
-                "Connection" to "keep-alive",
-                "x-client-token" to xClientToken(ts),
-                "x-tr-signature" to xTrSignature(method, accept, contentType, url, body, ts),
-                "x-client-info" to CLIENT_INFO,
-                "x-client-status" to "0",
-            )
-            if (!bootstrap) currentToken()?.let { headers["Authorization"] = "Bearer $it" }
+        // ponytail: one identity rotation per call; if the fresh id is banned too, surface the error.
+        for (round in 0..1) {
+            var banHit = false
+            for (host in HOSTS) {
+                val url = host + pathWithQuery
+                val ts = System.currentTimeMillis()
+                val headers = mutableMapOf(
+                    "User-Agent" to UA,
+                    "Accept" to accept,
+                    "Content-Type" to contentType,
+                    "Connection" to "keep-alive",
+                    "x-client-token" to xClientToken(ts),
+                    "x-tr-signature" to xTrSignature(method, accept, contentType, url, body, ts),
+                    "x-client-info" to clientInfo,
+                    "x-client-status" to "0",
+                )
+                if (!bootstrap) currentToken()?.let { headers["Authorization"] = "Bearer $it" }
 
-            val response = try {
-                if (method == "POST") {
-                    app.post(url, headers = headers, requestBody = (body ?: "").toRequestBody(contentType.toMediaType()))
-                } else {
-                    app.get(url, headers = headers)
+                val response = try {
+                    if (method == "POST") {
+                        app.post(url, headers = headers, requestBody = (body ?: "").toRequestBody(contentType.toMediaType()))
+                    } else {
+                        app.get(url, headers = headers)
+                    }
+                } catch (e: Exception) {
+                    lastError = e.message
+                    continue
                 }
-            } catch (e: Exception) {
-                lastError = e.message
+
+                response.headers["x-user"]?.let { absorbToken(it) }
+
+                if (response.code == 200) {
+                    mainUrl = host
+                    return JSONObject(response.body?.string() ?: "{}")
+                }
+                lastError = "HTTP ${response.code}: ${(response.body?.string() ?: "").take(200)}"
+                // 406 = device soft-ban, 441 = token rejected: rotate identity and retry once.
+                if (response.code in listOf(406, 441)) { banHit = true; break }
+                if (response.code !in listOf(403, 407, 429, 500, 502, 503, 504)) break
+            }
+            if (round == 0 && banHit && !bootstrap) {
+                clientInfo = newClientInfo()
+                bearer = null
+                try { request("/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version=", bootstrap = true) } catch (_: Exception) {}
                 continue
             }
-
-            response.headers["x-user"]?.let { absorbToken(it) }
-
-            if (response.code == 200) {
-                mainUrl = host
-                return JSONObject(response.body?.string() ?: "{}")
-            }
-            lastError = "HTTP ${response.code}: ${(response.body?.string() ?: "").take(200)}"
-            if (response.code !in listOf(403, 407, 429, 500, 502, 503, 504)) break
+            break
         }
         throw Exception("MovieBoxHD request failed: $lastError")
     }
@@ -522,6 +539,9 @@ class MovieBoxHDProvider : MainAPI() {
         val season = parts.getOrNull(1)?.toIntOrNull() ?: 0
         val episode = parts.getOrNull(2)?.toIntOrNull() ?: 0
         var found = false
+        // sid -> dub language name, so stream links say which audio they carry.
+        val dubLabels = mutableMapOf<String, String>()
+        fun dubTag(sid: String) = dubLabels[sid]?.let { " ($it)" } ?: ""
 
         suspend fun collectFromPlayInfo(sid: String, se: Int, ep: Int) {
             val play = dataOf("/wefeed-mobile-bff/subject-api/play-info?subjectId=$sid&se=$se&ep=$ep") ?: return
@@ -531,7 +551,7 @@ class MovieBoxHDProvider : MainAPI() {
                 val link = stream.optString("url").takeIf { isPlayableUrl(it) } ?: return@forEach
                 val quality = stream.optString("resolutions")
                     .split(",").firstOrNull()?.trim()?.toIntOrNull() ?: 0
-                callback(newSignedStream(link, quality, stream.optString("signCookie")))
+                callback(newSignedStream(link, quality, stream.optString("signCookie"), dubTag(sid)))
                 found = true
                 val streamId = stream.optString("id")
                 if (streamId.isNotBlank()) {
@@ -557,7 +577,7 @@ class MovieBoxHDProvider : MainAPI() {
                     .mapNotNull { it.trim().toIntOrNull()?.takeIf { q -> q > 0 } }
                     .ifEmpty { listOf(0) }
                     // series H5 CDN needs movie-box.co Referer; api6 mobile CDN rejects it
-                    .forEach { q -> callback(newVideoLink(link, q, mapOf("Referer" to "$WEB_HOST/"))) }
+                    .forEach { q -> callback(newVideoLink(link, q, mapOf("Referer" to "$WEB_HOST/"), dubTag(id))) }
                 found = true
             }
         }
@@ -570,12 +590,12 @@ class MovieBoxHDProvider : MainAPI() {
                 if (episode > 0 && resSeason != 0 && resSeason != season) return@forEach
                 val link = res.optString("resourceLink").takeIf { isPlayableUrl(it) }
                     ?: res.optString("url").takeIf { isPlayableUrl(it) } ?: return@forEach
-                callback(newVideoLink(link, res.optInt("resolution", detector.optInt("resolution", 0))))
+                callback(newVideoLink(link, res.optInt("resolution", detector.optInt("resolution", 0)), dub = dubTag(id)))
                 found = true
             }
             val direct = detector.optString("downloadUrl").takeIf { isPlayableUrl(it) }
             if (direct != null) {
-                callback(newVideoLink(direct, 0))
+                callback(newVideoLink(direct, 0, dub = dubTag(id)))
                 found = true
             }
         }
@@ -583,7 +603,13 @@ class MovieBoxHDProvider : MainAPI() {
         // 2. Per-episode resources.
         val resourceSids = linkedSetOf(id)
         detail?.optJSONArray("dubs")?.objects()?.forEach { dub ->
-            dub.optString("subjectId").takeIf { it.isNotBlank() }?.let { resourceSids += it }
+            val sid = dub.optString("subjectId")
+            if (sid.isNotBlank()) {
+                resourceSids += sid
+                if (!dub.optBoolean("original")) {
+                    dub.optString("lanName").takeIf { it.isNotBlank() }?.let { dubLabels[sid] = it }
+                }
+            }
         }
         for (sid in resourceSids) {
             val list = dataOf("/wefeed-mobile-bff/subject-api/resource?subjectId=$sid&se=$season&ep=$episode")
@@ -593,7 +619,7 @@ class MovieBoxHDProvider : MainAPI() {
             chosen.forEach { item ->
                 val link = item.optString("resourceLink").takeIf { isPlayableUrl(it) }
                     ?: item.optString("url").takeIf { isPlayableUrl(it) } ?: return@forEach
-                callback(newVideoLink(link, item.optInt("resolution", 0)))
+                callback(newVideoLink(link, item.optInt("resolution", 0), dub = dubTag(sid)))
                 found = true
                 item.optJSONArray("extCaptions")?.objects()?.forEach { captionCallback(it, subtitleCallback) }
             }
@@ -622,9 +648,9 @@ class MovieBoxHDProvider : MainAPI() {
         subtitleCallback(newSubtitleFile(lang, url))
     }
 
-    private suspend fun newVideoLink(url: String, quality: Int, headers: Map<String, String> = emptyMap()) = newExtractorLink(
+    private suspend fun newVideoLink(url: String, quality: Int, headers: Map<String, String> = emptyMap(), dub: String = "") = newExtractorLink(
         source = name,
-        name = "$name ${if (quality > 0) "${quality}p" else "auto"}",
+        name = "$name ${if (quality > 0) "${quality}p" else "auto"}$dub",
         url = url,
         type = ExtractorLinkType.VIDEO,
     ) {
@@ -633,9 +659,9 @@ class MovieBoxHDProvider : MainAPI() {
         if (headers.isNotEmpty()) this.headers = headers
     }
 
-    private suspend fun newSignedStream(url: String, quality: Int, signCookie: String) = newExtractorLink(
+    private suspend fun newSignedStream(url: String, quality: Int, signCookie: String, dub: String = "") = newExtractorLink(
         source = name,
-        name = "$name stream ${if (quality > 0) "${quality}p" else ""}".trim(),
+        name = "$name stream ${if (quality > 0) "${quality}p" else ""}$dub".trim(),
         url = url,
         type = if (url.contains(".mpd")) ExtractorLinkType.DASH
         else if (url.contains(".m3u8")) ExtractorLinkType.M3U8
