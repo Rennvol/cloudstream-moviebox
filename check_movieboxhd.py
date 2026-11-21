@@ -3,15 +3,17 @@
 dub labels (detail.dubs lanName), recommendations (H5 subject/recommend).
 Run after any change to those paths: python3 check_movieboxhd.py
 """
-import base64, hashlib, hmac, json, time, urllib.parse, urllib.request
+import base64, hashlib, hmac, json, time, urllib.parse, urllib.request, uuid
 
 KEY = base64.b64decode(base64.b64decode("NzZpUmwwN3MweFNOOWpxbUVXQXQ3OUVCSlp1bElRSXNWNjRGWnIyTw=="))
 MODEL = "22101316G"
 UA = f"com.community.oneroom/50020042 (Linux; U; Android 14; en_IN; {MODEL}; Build/UD1A.230803.041; Cronet/145.0.7582.0)"
+# Random identity per run: the BFF soft-bans fixed device_ids (406 "find no
+# content" on get/search/resource while season-info stays 200).
 CLIENT_INFO = json.dumps({"package_name": "com.community.oneroom", "version_name": "3.0.03.0529.03",
     "version_code": 50020042, "os": "android", "os_version": "14",
-    "device_id": "0123456789abcdef0123456789abcdef", "install_store": "official",
-    "gaid": "1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d", "brand": "xiaomi", "model": MODEL,
+    "device_id": uuid.uuid4().hex, "install_store": "official",
+    "gaid": str(uuid.uuid4()), "brand": "xiaomi", "model": MODEL,
     "system_language": "en", "net": "NETWORK_WIFI", "region": "US", "timezone": "Asia/Jakarta",
     "sp_code": ""}, separators=(",", ":"))
 HOSTS = ["https://api6.aoneroom.com", "https://api5.aoneroom.com", "https://api4.aoneroom.com",
